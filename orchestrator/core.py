@@ -19,7 +19,10 @@ class RuleError(ValueError):
 
 
 class Core:
-    def __init__(self, db: Path, deployer, log=lambda *a, **k: None):
+    def __init__(self, db: Path, deployer, log=lambda *a, **k: None, offline=False):
+        # Offline mode: names are not verified, so nothing may depend on identity
+        # (no ranked results, no in-game administration).
+        self.offline = offline
         self.lock = threading.RLock()
         self.db = sqlite3.connect(db, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -58,10 +61,11 @@ class Core:
         return player
 
     def target(self, name):
-        row = self.db.execute("SELECT id FROM players WHERE lower(name)=lower(?)", (name,)).fetchone()
-        if not row:
+        # A name can have an online and an offline UUID: prefer the account connected now.
+        rows = [r[0] for r in self.db.execute("SELECT id FROM players WHERE lower(name)=lower(?)", (name,))]
+        if not rows:
             raise RuleError("Joueur inconnu : il doit se connecter au moins une fois")
-        return row[0]
+        return next((uid for uid in rows if uid in self.online), rows[0])
 
     def name(self, uid):
         row = self.db.execute("SELECT name FROM players WHERE id=?", (uid,)).fetchone()
@@ -110,7 +114,7 @@ class Core:
                 self.free(members)
                 self.queue.append(dict(owner=p, players=members, mode=mode, time=time.time()))
                 self.log('queue_join', player=p, mode=mode, size=len(members))
-                return self.message("Équipe inscrite en " + mode)
+                return self.message("Équipe inscrite en " + mode + (" (non classé : mode hors ligne)" if self.offline else ""))
             if action == 'leave':
                 # During a match, proxy transfers to lobby and game treats this as forfeit.
                 self.queue = [q for q in self.queue if p not in q['players']]
@@ -137,10 +141,13 @@ class Core:
                 owner, members = self.party(p)
                 role = self.db.execute("SELECT role FROM players WHERE id=?", (p,)).fetchone()[0]
                 return {'message': 'Rush', 'lines': ['Rôle : '+role, 'Équipe : '+', '.join(map(self.name, members)),
-                        f"File : {sum(len(q['players']) for q in self.queue)} joueurs", f"Parties : {len(self.active)}"], 'role': role}
+                        f"File : {sum(len(q['players']) for q in self.queue)} joueurs", f"Parties : {len(self.active)}"]
+                        + (['Mode hors ligne : parties non classées'] if self.offline else []), 'role': role}
             if action == 'players':
                 return {'message':'Joueurs connectés', 'lines':sorted(self.name(uid) for uid in self.online if uid != p)}
             if action == 'admin':
+                if self.offline:
+                    raise RuleError("Administration en jeu désactivée en mode hors ligne (pseudos non vérifiés) : utiliser la CLI")
                 role = self.db.execute("SELECT role FROM players WHERE id=?", (p,)).fetchone()[0]
                 if role not in ('moderator', 'admin'):
                     raise RuleError("Permission refusée")
@@ -283,6 +290,7 @@ class Core:
     def launch(self, mode, teams, ranked):
         if not self.deployer.available():
             raise RuleError("Capacité atteinte, réessayez dans quelques instants")
+        ranked = ranked and not self.offline
         mid = 'rush-' + secrets.token_hex(6)
         match = dict(id=mid, mode=mode, teams=teams, ranked=ranked, state='starting', created=time.time())
         # Reserve roster before spawning to make admission deterministic.

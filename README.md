@@ -24,6 +24,8 @@ Depuis un clone du dépôt, lancer directement `deploy/install.sh` en root (`sud
 
 Le script installe Java 21 (dépôt Temurin si la distribution ne le fournit pas), Python et curl, crée l’utilisateur système `rush`, copie le réseau dans `/opt/rush`, télécharge les serveurs vérifiés par SHA-256, génère les clés, règle `max_instances` selon la RAM, ouvre 25565/TCP si ufw ou firewalld est actif, installe et démarre le service systemd, puis attend que le lobby réponde. Relancer `sudo ./install.sh` avec une nouvelle archive met à jour le code et redémarre le service sans toucher à `runtime/` (base, clés, réglages locaux). Options : `--dir`, `--user`, `--no-service`, `--no-start`.
 
+**Secours si l’authentification Microsoft/Mojang est en panne :** `rush auth offline && rush restart` accepte les comptes non vérifiés, et `rush auth online && rush restart` revient à la normale. En mode hors ligne, n’importe qui peut prendre n’importe quel pseudo. Pour limiter les dégâts, toutes les parties sont non classées (le classement n’est pas touché), l’administration en jeu est désactivée (utiliser la CLI), et le MOTD affiche « HORS LIGNE ». Les comptes hors ligne ont d’autres UUID : leurs amis et équipes ne sont pas ceux des comptes officiels. Revenir en ligne dès que possible.
+
 Administration ensuite avec `rush status`, `rush role <pseudo> admin`, `rush deploy-test --mode 5v5`, `rush logs`, `rush stop|start|restart`.
 
 ## Démarrage en développement

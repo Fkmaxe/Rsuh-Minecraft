@@ -44,6 +44,9 @@ class Processes:
         self.root = Path(root).resolve()
         self.settings, self.token, self.secret, self.log = settings, token, forwarding_secret, log
         self.children = {}
+        # test_offline: isolated loopback test network. offline_mode: temporary public fallback
+        # when Microsoft/Mojang authentication is down (names are not verified).
+        self.online_mode = str(not (settings.get('test_offline') or settings.get('offline_mode'))).lower()
 
     def available(self):
         return sum(n.startswith('rush-') for n in list(self.children)) < self.settings['max_instances']
@@ -96,10 +99,10 @@ motd=Rush {name}
         (folder / 'config' / 'paper-global.yml').write_text(f'''_version: 31
 proxies:
   bungee-cord:
-    online-mode: {str(not self.settings.get('test_offline',False)).lower()}
+    online-mode: {self.online_mode}
   velocity:
     enabled: false
-    online-mode: {str(not self.settings.get('test_offline',False)).lower()}
+    online-mode: {self.online_mode}
     secret: "{self.secret}"
 misc:
   enable-nether: false
@@ -126,9 +129,9 @@ misc:
         (folder / 'forwarding.secret').chmod(0o600)
         (folder / 'velocity.toml').write_text(f'''config-version = "2.7"
 bind = "{'127.0.0.1' if self.settings.get('test_offline') else '0.0.0.0'}:{self.settings['proxy_port']}"
-motd = "Rush Training | 1v1 - 2v2 - 5v5"
+motd = "Rush Training | 1v1 - 2v2 - 5v5{' | HORS LIGNE - non classé' if self.settings.get('offline_mode') else ''}"
 show-max-players = 100
-online-mode = {str(not self.settings.get('test_offline',False)).lower()}
+online-mode = {self.online_mode}
 force-key-authentication = false
 player-info-forwarding-mode = "bungeeguard"
 forwarding-secret-file = "forwarding.secret"

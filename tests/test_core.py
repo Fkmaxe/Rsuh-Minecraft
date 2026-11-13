@@ -151,6 +151,36 @@ class CoreTest(unittest.TestCase):
         with self.assertRaises(RuleError):self.core.abort('rush-unknown','draw')
 
 
+class OfflineModeTest(unittest.TestCase):
+    """Offline fallback: unverified names must never earn ratings or admin rights."""
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.core=Core(Path(self.temp.name)/'test.db',FakeDeployer(),offline=True)
+        self.ids=[str(uuid.uuid4()) for _ in range(2)]
+        self.core.presence([{'id':p,'name':'Player'+str(i)} for i,p in enumerate(self.ids)])
+    def tearDown(self):self.core.db.close();self.temp.cleanup()
+
+    def test_matches_are_unranked(self):
+        for i,p in enumerate(self.ids):self.core.command(p,'Player'+str(i),'queue',['1v1'])
+        self.core.tick();self.core.tick()
+        mid=next(iter(self.core.active))
+        teams=self.core.active[mid]['teams']
+        self.core.finish(mid,0,{p:{'kills':1,'deaths':0,'beds':1} for t in teams for p in t})
+        self.assertEqual(0,self.core.db.execute('SELECT ranked FROM matches WHERE id=?',(mid,)).fetchone()[0])
+        self.assertEqual(0,self.core.db.execute('SELECT count(*) FROM stats').fetchone()[0])
+
+    def test_in_game_admin_disabled_even_for_admin_name(self):
+        self.core.set_role(self.ids[0],'admin')
+        with self.assertRaises(RuleError):self.core.command(self.ids[0],'Player0','admin',[])
+
+    def test_name_lookup_prefers_connected_account(self):
+        stale=str(uuid.uuid4())  # Same name seen earlier with its online-mode UUID, stored first.
+        self.core.db.execute('DELETE FROM players WHERE id=?',(self.ids[1],))
+        self.core.db.execute('INSERT INTO players(id,name) VALUES(?,?)',(stale,'Player1'))
+        self.core.db.execute('INSERT INTO players(id,name) VALUES(?,?)',(self.ids[1],'Player1'))
+        self.assertEqual(self.ids[1],self.core.target('player1'))
+
+
 class PruneTest(unittest.TestCase):
     def test_prune_keeps_logs_and_never_follows_shared_folders(self):
         with tempfile.TemporaryDirectory() as temp:

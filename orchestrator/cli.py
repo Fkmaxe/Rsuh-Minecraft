@@ -50,6 +50,8 @@ def main():
     role = sub.add_parser('role')
     role.add_argument('name')
     role.add_argument('role', choices=['player','moderator','admin'])
+    auth = sub.add_parser('auth', help='online (comptes Microsoft vérifiés) ou offline (secours temporaire)')
+    auth.add_argument('mode', choices=['online','offline'])
     args = parser.parse_args()
     runtime = ROOT/'runtime'
     if args.command == 'init':
@@ -66,6 +68,17 @@ def main():
             overrides['eula'] = True
             local.write_text(json.dumps(overrides, indent=2))
         print('Initialisé. EULA :', read_settings()['eula'])
+    elif args.command == 'auth':
+        local = runtime/'settings.json'
+        overrides = json.loads(local.read_text()) if local.exists() else {}
+        overrides['offline_mode'] = args.mode == 'offline'
+        local.write_text(json.dumps(overrides, indent=2))
+        if args.mode == 'offline':
+            print('Mode HORS LIGNE enregistré : pseudos non vérifiés, parties non classées, administration en jeu désactivée.')
+            print('Revenir dès que possible : auth online')
+        else:
+            print('Mode EN LIGNE enregistré : comptes Microsoft vérifiés.')
+        print('Appliquer : redémarrer le réseau (rush restart).')
     elif args.command == 'status':
         print(json.dumps(request('/health'), indent=2))
     elif args.command == 'role':
@@ -115,7 +128,10 @@ def main():
         log = make_logger(runtime/'events.jsonl')
         token = (runtime/'api.token').read_text().strip()
         processes = Processes(ROOT,settings,token,(runtime/'forwarding.secret').read_text().strip(),log)
-        core = Core(runtime/'rush.sqlite3',processes,log)
+        core = Core(runtime/'rush.sqlite3',processes,log,offline=bool(settings.get('offline_mode')))
+        if settings.get('offline_mode'):
+            log('offline_mode_enabled')
+            print('ATTENTION : mode hors ligne, pseudos non vérifiés, parties non classées.', flush=True)
         server = serve(core, settings, token)
         (runtime/'supervisor.pid').write_text(str(os.getpid()))
         stopping = False
