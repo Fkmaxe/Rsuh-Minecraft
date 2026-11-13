@@ -73,7 +73,11 @@ Le matchmaking forme deux équipes de taille exacte en conservant les groupes. U
 
 ## Commandes et menus
 
-`/rush` ou la boussole ouvre l’interface d’inventaire : modes, équipes, amis, classements et parties privées. Les invitations reçues peuvent être acceptées dans le menu ; la saisie d’un pseudo ou d’un code privé se fait par commande.
+`/rush` ou la boussole ouvre le menu : profil (Elo, rang, V/D, K/D), files 1v1/2v2/5v5 avec le nombre de joueurs en attente, équipe, amis, classements, parties privées, et maps pour les administrateurs. `/team`, `/friend` et `/private` sans argument ouvrent directement leur menu. Les menus ont un cadre, des icônes, des têtes de joueurs et indiquent l’action de chaque clic (gauche, droit, Maj).
+
+**Interface en jeu.** Au lobby, le TAB affiche le grade (ADMIN, MODO), le pseudo et l’Elo de chaque joueur, avec en-tête et pied de page (joueurs en ligne, parties, file, ton Elo et ton rang). Un scoreboard personnel affiche grade, Elo, rang, victoires/défaites, K/D, équipe et file, et une barre d’action indique le temps de recherche. En partie, le scoreboard montre carte, temps, lits et joueurs en vie par équipe, mort subite et fin. Le TAB est coloré par équipe, avec les kills, les éliminés barrés et ses propres statistiques en pied de page. Des titres et des sons marquent le compte à rebours, le départ, les lits détruits, la mort, la réapparition, l’élimination et la victoire. Le chat affiche le grade et l’Elo au lobby, l’équipe en partie.
+
+**Notifications.** Le proxy les livre partout, au lobby comme en partie : invitations d’équipe, d’ami et de salon avec boutons cliquables **[Accepter] [Refuser] [Rejoindre]**, invitations en attente rappelées à la connexion, amis qui se connectent ou se déconnectent, arrivées et départs dans l’équipe ou le salon, salon complet avec bouton **[Démarrer]**, partie trouvée (mode, carte, coéquipiers), résultat avec variation d’Elo et partie annulée avec sa raison. Ajouter en ami quelqu’un qui t’a déjà demandé accepte directement.
 
 | Commande | Usage |
 |---|---|
@@ -81,20 +85,40 @@ Le matchmaking forme deux équipes de taille exacte en conservant les groupes. U
 | `/rush leave` | Quitter la file/le salon ou abandonner une partie |
 | `/rush status` | Rôle, équipe et état du réseau |
 | `/team invite <pseudo>` | Invitation persistante, 5 membres maximum |
-| `/team accept <pseudo>` | Accepter l’invitation du chef |
+| `/team accept <pseudo>`, `/team deny <pseudo>` | Accepter ou refuser l’invitation du chef |
 | `/team list`, `/team leave`, `/team kick <pseudo>` | Gérer l’équipe ; le départ du chef la dissout |
-| `/friend add <pseudo>`, `/friend accept <pseudo>` | Demande d’amitié avec acceptation explicite |
+| `/friend add <pseudo>`, `/friend accept <pseudo>`, `/friend deny <pseudo>` | Demande d’amitié avec acceptation ou refus explicite |
 | `/friend list`, `/friend remove <pseudo>` | Amis, demandes et présence |
 | `/private create <mode>` | Créer un salon privé non classé |
 | `/private join <code>`, `/private list` | Rejoindre et voir les camps |
+| `/private invite <pseudo>` | Envoyer un bouton « Rejoindre » à un joueur connecté |
 | `/private start` | Démarrer un salon complet, par son créateur |
 | `/leaderboard [global\|1v1\|2v2\|5v5]` | Top 10 par Elo puis victoires |
 | `/shop` | Boutique, à proximité de sa base |
 | `/rush admin` | Voir les parties actives, modérateur ou administrateur |
 | `/rush admin abort <id>` | Annuler sans résultat, modérateur ou administrateur |
 | `/rush admin role <pseudo> <rôle>` | Changer un rôle, administrateur uniquement |
+| `/map` (ou menu → Maps) | Liste des maps : éditer, activer/désactiver, supprimer — administrateur |
+| `/map create <nom> [classic\|vide\|<map>]` | Créer une map (inactive) depuis un modèle ou une copie |
+| `/map edit <nom>` | Ouvrir l’éditeur de la map |
+| `/map enable\|disable <nom>`, `/map modes <nom> 1v1,2v2` | Mettre en rotation, choisir les modes |
+| `/map delete <nom>` | Supprimer, après confirmation par bouton (classic est protégée) |
 
 Rôles centralisés : `player`, `moderator`, `admin`. L’attribution initiale se fait avec la CLI locale. Les comptes doivent s’être connectés au moins une fois pour être ciblés. Les permissions sont contrôlées côté API, avec les UUID authentifiés du proxy ; elles ne reposent pas sur une valeur envoyée par le client Minecraft.
+
+### Éditeur de maps
+
+`/map edit <nom>` ouvre une instance dédiée, et l’admin y est transféré en créatif. La map y est construite librement. L’étoile du Nether (ou `/map` dans l’éditeur) ouvre le menu d’édition :
+
+- **Spawns** rouge et bleu à sa position et son orientation, avec téléportation vers chacun.
+- **Lits** : regarder un lit puis cliquer « Lit rouge » ou « Lit bleu ». Poser un lit propose aussi directement les deux boutons dans le chat.
+- **PNJ boutique** (blocs, armes, armures, équipement) : clic gauche pour l’équipe rouge, clic droit pour la bleue. Un clic droit sur un PNJ le sélectionne (surbrillance), puis on peut le déplacer à sa position, le supprimer ou changer sa boutique.
+- **Générateurs** bronze, fer ou or à sa position, et suppression du plus proche.
+- **Limites** : bordure (taille et centre), hauteur de construction minimale et maximale, hauteur du vide.
+
+Des repères flottants montrent spawns, lits et générateurs, et le scoreboard indique ce qui manque. Rien n’est conservé sans **Enregistrer**. L’éditeur s’arrête alors proprement, l’orchestrateur copie le monde (blocs, entités) une fois tous les fichiers fermés, puis rouvre l’éditeur à l’endroit où l’admin se trouvait (quelques secondes). **Quitter** propose d’enregistrer ou d’abandonner les modifications. Un éditeur sans son admin pendant 10 minutes est fermé sans enregistrer.
+
+Une map ne peut être activée que si elle a ses deux spawns, ses deux lits et au moins un générateur de bronze. Les parties tirent au hasard une map active pour leur mode, sinon la map intégrée `classic`. Les maps sont dans `runtime/maps/<nom>/` (`map.json` + `world/`), à inclure dans les sauvegardes. Les données des joueurs (inventaire, position) ne sont jamais copiées dans une map. L’édition est désactivée en mode hors ligne.
 
 Les salons privés placent les participants alternativement rouge/bleu selon l’ordre d’arrivée. Ils expirent après 30 minutes ou au départ de leur créateur. Une équipe ne peut pas être modifiée pendant une inscription ou une partie.
 

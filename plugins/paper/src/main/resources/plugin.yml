@@ -1,5 +1,5 @@
 name: Rush
-version: 1.0.0
+version: 1.1.0
 main: fr.rush.paper.RushPlugin
 api-version: '1.21.11'
 description: Rush training, matchmaking and configurable PvP
@@ -22,3 +22,7 @@ commands:
     description: Classement global ou par mode
   shop:
     description: Boutique Rush
+
+  map:
+    aliases: [maps]
+    description: Maps (administrateurs) et éditeur de map

@@ -8,6 +8,8 @@ import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.proxy.*;
 import com.velocitypowered.api.proxy.server.*;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.slf4j.Logger;
 import java.net.*;
 import java.net.http.*;
@@ -15,8 +17,9 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
-@Plugin(id="rush-proxy", name="RushProxy", version="1.0.0", authors={"Rush"})
+@Plugin(id="rush-proxy", name="RushProxy", version="1.1.0", authors={"Rush"})
 public final class RushProxy {
+    private static final Component PREFIX = MiniMessage.miniMessage().deserialize("<dark_gray>[</dark_gray><gold>Rush</gold><dark_gray>]</dark_gray> ");
     private final ProxyServer proxy;
     private final Logger log;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3)).build();
@@ -29,7 +32,8 @@ public final class RushProxy {
     @Inject public RushProxy(ProxyServer proxy, Logger log) { this.proxy=proxy; this.log=log; }
 
     @Subscribe public void start(ProxyInitializeEvent event) {
-        proxy.getScheduler().buildTask(this, this::poll).repeat(Duration.ofSeconds(2)).schedule();
+        // 1 s: invitations and transfers feel immediate; two small loopback requests per second.
+        proxy.getScheduler().buildTask(this, this::poll).repeat(Duration.ofSeconds(1)).schedule();
         log.info("RUSH_PROXY_READY");
     }
 
@@ -41,6 +45,8 @@ public final class RushProxy {
         if (result.statusCode()!=200) throw new IllegalStateException("API status "+result.statusCode());
         return JsonParser.parseString(result.body()).getAsJsonObject();
     }
+
+    private static boolean dynamic(String server) { return !server.equals("lobby"); }
 
     private void poll() {
         try {
@@ -68,8 +74,10 @@ public final class RushProxy {
                     else connecting.remove(p.getUniqueId());
                 }
             }
+            if (data.has("messages")) deliver(data.getAsJsonObject("messages"));
             for (RegisteredServer s : proxy.getAllServers()) {
-                if (s.getServerInfo().getName().startsWith("rush-") && !live.contains(s.getServerInfo().getName()) && s.getPlayersConnected().isEmpty()) proxy.unregisterServer(s.getServerInfo());
+                String name=s.getServerInfo().getName();
+                if (dynamic(name) && !live.contains(name) && s.getPlayersConnected().isEmpty()) proxy.unregisterServer(s.getServerInfo());
             }
             failures=0;
         } catch (Exception e) {
@@ -77,9 +85,22 @@ public final class RushProxy {
         }
     }
 
+    /** Notifications are delivered by the proxy so they reach players in the lobby, a game or the editor. */
+    private void deliver(JsonObject messages) {
+        for (Map.Entry<String,JsonElement> entry : messages.entrySet()) {
+            Optional<Player> player = proxy.getPlayer(UUID.fromString(entry.getKey()));
+            if (player.isEmpty()) continue;
+            for (JsonElement text : entry.getValue().getAsJsonArray()) {
+                try { player.get().sendMessage(PREFIX.append(MiniMessage.miniMessage().deserialize(text.getAsString()))); }
+                catch (RuntimeException e) { log.warn("Invalid notification: {}", e.toString()); }
+            }
+        }
+    }
+
     @Subscribe public void admission(ServerPreConnectEvent event) {
         String target=event.getOriginalServer().getServerInfo().getName();
-        if (target.startsWith("rush-") && !target.equals(routes.get(event.getPlayer().getUniqueId())))
+        // Game and editor instances only admit their routed players (no /server shortcuts).
+        if (dynamic(target) && !target.equals(routes.get(event.getPlayer().getUniqueId())))
             event.setResult(ServerPreConnectEvent.ServerResult.denied());
     }
 }

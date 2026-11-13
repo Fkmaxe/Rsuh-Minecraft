@@ -21,7 +21,7 @@ class CoreTest(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.deployer=FakeDeployer()
-        self.core=Core(Path(self.temp.name)/'test.db',self.deployer)
+        self.core=Core(Path(self.temp.name)/'test.db',self.deployer,stop_delay=0)
         self.ids=[str(uuid.uuid4()) for _ in range(12)]
         self.names={p:'Player'+str(i) for i,p in enumerate(self.ids)}
         self.core.presence([{'id':p,'name':n} for p,n in self.names.items()])

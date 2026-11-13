@@ -30,9 +30,13 @@ final class Api implements AutoCloseable {
         });
     }
     void command(Player player,String action,String[] args,Consumer<JsonObject> consumer) {
+        query(player,action,args,consumer,message->Text.error(player,message));
+    }
+    /** Same as command, with the caller deciding how to show a refusal (menus fall back to another view). */
+    void query(Player player,String action,String[] args,Consumer<JsonObject> consumer,Consumer<String> failure) {
         JsonObject body=new JsonObject(); body.addProperty("player",player.getUniqueId().toString()); body.addProperty("name",player.getName());
         body.addProperty("action",action); body.add("args",new Gson().toJsonTree(args));
-        post("/command",body,result->{if(player.isOnline()) consumer.accept(result);},message->{if(player.isOnline()) player.sendMessage("§c"+message);});
+        post("/command",body,result->{if(player.isOnline()) consumer.accept(result);},message->{if(player.isOnline()) failure.accept(message);});
     }
     public void close() { executor.shutdownNow(); }
 }

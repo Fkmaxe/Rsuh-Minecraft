@@ -39,6 +39,16 @@ Le rapport du dernier test se trouve dans `runtime/smoke-report.json` : il donne
 
 Les essais ont permis de corriger le descripteur Velocity sous Java 25, le transfert d’identité pour les clients antérieurs à 1.13, la détection du protocole des serveurs dynamiques, l’annulation involontaire du clic gauche sur les lits et les dégâts des TNT sans propriétaire classées comme explosions de bloc par Paper.
 
+## Interfaces, notifications et éditeur de maps
+
+`python3 -m unittest discover -s tests` : **40 tests réussis**, dont les notifications (invitation avec boutons, refus, arrivée et départ d’équipe, présence des amis, invitations rappelées à la connexion, salon privé, variation d’Elo), les profils du TAB, les droits sur les maps, la validation des données envoyées par l’éditeur, l’enregistrement avec relance et position conservée, l’arrêt non propre qui conserve la map précédente, la fermeture d’un éditeur inactif et l’arrêt différé des instances.
+
+`python3 scripts/smoke_network.py` vérifie en plus, avec les clients 1.9.4 : réception des notifications cliquables, menus et boutique par catégories, notification d’Elo en fin de partie, puis création d’une map depuis `classic`, édition (générateur, PNJ), enregistrement réel du monde, réouverture de l’éditeur, sortie, activation et **partie réelle sur la map enregistrée** (lits présents des deux côtés, 9 PNJ). Les fichiers de région enregistrés sont contrôlés : tailles multiples de 4 Kio, sans `playerdata`.
+
+Ces essais ont corrigé deux défauts réels. Le premier : copier le monde d’un serveur en marche produisait des régions tronquées et emportait les données du joueur. L’enregistrement passe maintenant par un arrêt propre. Le second : un serveur qui s’arrête expulsait ses joueurs du réseau avant que le proxy les renvoie au lobby. L’arrêt est maintenant différé de 3 secondes.
+
+Le rendu visuel (couleurs, scoreboard, titres) n’est pas vérifiable par les bots : à contrôler en jeu avec le client 1.9.4.
+
 ## Limites à respecter
 
 - Ces tests utilisent une authentification offline sur un proxy de test limité à `127.0.0.1`. Le réseau normal conserve l’authentification Microsoft/Mojang ; aucune connexion avec un compte officiel réel n’a été effectuée ici.

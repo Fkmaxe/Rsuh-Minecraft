@@ -28,7 +28,7 @@ readline.createInterface({input:process.stdin}).on('line', async line=> {
     if(req.action==='chat'){bot.chat(req.message);result=true;}
     if(req.action==='state') result={position:bot.entity.position,health:bot.health,items:bot.inventory.items().map(i=>({name:i.name,count:i.count})),window:bot.currentWindow?.title};
     if(req.action==='click'){await bot.clickWindow(req.slot,0,0);result=true;}
-    if(req.action==='close'){bot.closeWindow(bot.currentWindow);result=true;}
+    if(req.action==='close'){if(bot.currentWindow)bot.closeWindow(bot.currentWindow);result=true;}
     if(req.action==='attack') {
       const target=bot.players[req.target]?.entity;if(!target)throw new Error('Target not visible');
       await bot.lookAt(target.position.offset(0,1.5,0));bot.attack(target);result=true;

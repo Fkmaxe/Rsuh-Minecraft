@@ -18,6 +18,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from orchestrator.cli import read_settings
 from orchestrator.core import Core
+from orchestrator.maps import Maps
 from orchestrator.processes import Processes
 from orchestrator.protocol import ping
 from orchestrator.server import serve, make_logger
@@ -41,8 +42,9 @@ def main():
     (root/'artifacts').symlink_to(ROOT/'artifacts',target_is_directory=True)
     (root/'runtime').mkdir()
     token=secrets.token_hex(32)
-    processes=Processes(root,settings,token,secrets.token_hex(32),make_logger(root/'runtime/events.jsonl'))
-    core=Core(root/'runtime/rush.sqlite3',processes)
+    log=make_logger(root/'runtime/events.jsonl')
+    processes=Processes(root,settings,token,secrets.token_hex(32),log)
+    core=Core(root/'runtime/rush.sqlite3',processes,log,maps=Maps(root/'runtime/maps'))
     server=serve(core,settings,token)
     stop=threading.Event()
     def ticker():
@@ -82,18 +84,23 @@ def main():
             return len(core.online)==2 and sum(e.get('event')=='spawn' for e in events)>=2
         wait_for(online,timeout=45,label='1.9.4 bot login')
         print('PASS two 1.9.4 clients authenticated by isolated test proxy',flush=True)
-        exchange('chat',message='/friend add RushBotB');time.sleep(0.5)
+        def chat_seen(name,text):
+            drain();return any(e.get('event')=='chat' and e.get('name')==name and text in e.get('message','') for e in events)
+        exchange('chat',message='/friend add RushBotB')
+        wait_for(lambda:chat_seen('RushBotB','veut être ton ami') and chat_seen('RushBotB','[Accepter]'),timeout=10,label='friend request notification')
         exchange('chat',name='RushBotB',message='/friend accept RushBotA')
         wait_for(lambda:core.db.execute('SELECT count(*) FROM friends WHERE accepted=1').fetchone()[0]==1,timeout=10,label='friend commands')
         exchange('chat',message='/team invite RushBotB');time.sleep(0.5)
+        wait_for(lambda:chat_seen('RushBotB','t’invite dans son équipe'),timeout=10,label='team invite notification')
         exchange('chat',name='RushBotB',message='/team accept RushBotA')
+        wait_for(lambda:chat_seen('RushBotA','a rejoint l’équipe'),timeout=10,label='team join notification')
         wait_for(lambda:core.db.execute('SELECT count(*) FROM teams').fetchone()[0]==2,timeout=10,label='team commands')
         exchange('chat',message='/team leave')
         wait_for(lambda:core.db.execute('SELECT count(*) FROM teams').fetchone()[0]==0,timeout=10,label='team leave')
-        print('PASS friend and team commands from 1.9.4 clients',flush=True)
+        print('PASS friend and team commands with clickable notifications',flush=True)
         exchange('chat',message='/rush');time.sleep(1)
         assert exchange('state')['window'], 'Rush menu missing'
-        exchange('click',slot=11);exchange('close')
+        exchange('click',slot=20)  # 1v1 button; the menu closes itself.
         exchange('chat',name='RushBotB',message='/rush 1v1')
         mid=wait_for(lambda:next(iter(core.active),None),label='automatic matchmaking')
         wait_for(lambda:processes.status(mid)=='ready',label='game process ready')
@@ -132,10 +139,11 @@ def main():
         own=-32 if side==0 else 32;enemy=-own
         console(f'tp RushBotA {own} 65 3');console('give RushBotA minecraft:brick 4');time.sleep(1)
         exchange('chat',message='/shop');time.sleep(0.5)
-        exchange('click',slot=0);time.sleep(0.5)
+        exchange('click',slot=10);time.sleep(0.5)  # Category « Blocs »
+        exchange('click',slot=10);time.sleep(0.5)  # 16 sandstone for 4 bronze
         inventory=exchange('state')['items']
         assert any(i['name']=='sandstone' and i['count']==16 for i in inventory),inventory
-        exchange('click',slot=0);time.sleep(0.5)
+        exchange('click',slot=10);time.sleep(0.5)
         assert sum(i['count'] for i in exchange('state')['items'] if i['name']=='sandstone')==16
         exchange('close')
         console(f'summon minecraft:tnt {own} 65 2')
@@ -152,7 +160,8 @@ def main():
         wait_for(lambda:core.db.execute('SELECT state FROM matches WHERE id=?',(mid,)).fetchone()[0]=='finished',timeout=30,label='result callback')
         rows=core.db.execute("SELECT * FROM stats WHERE mode='global'").fetchall()
         assert len(rows)==2 and sum(r['wins'] for r in rows)==1
-        print('PASS bed protection + bed destruction + elimination + ranked result',flush=True)
+        wait_for(lambda:chat_seen('RushBotA','Elo') and chat_seen('RushBotB','Elo'),timeout=10,label='Elo result notification')
+        print('PASS bed protection + bed destruction + elimination + ranked result + Elo notification',flush=True)
         wait_for(lambda:all(abs(exchange('state',name=n)['position']['x']-0.5)<1 for n in ('RushBotA','RushBotB')),timeout=30,label='lobby return')
         print('PASS automatic lobby return',flush=True)
         wins_before=core.db.execute('SELECT sum(wins) FROM stats').fetchone()[0]
@@ -167,8 +176,58 @@ def main():
         wait_for(lambda:core.db.execute('SELECT state FROM matches WHERE id=?',(private_id,)).fetchone()[0]=='finished',timeout=30,label='private finish')
         assert core.db.execute('SELECT sum(wins) FROM stats').fetchone()[0]==wins_before
         print('PASS private match deployment, forfeit and no ranked points',flush=True)
+        # Map editor: create from the classic template, edit, save and leave.
+        wait_for(lambda:abs(exchange('state')['position']['x']-0.5)<1 and not core.active,timeout=30,label='lobby before editor')
+        core.set_role(core.target('RushBotA'),'admin')
+        exchange('chat',message='/map create arene classic')
+        wait_for(lambda:(root/'runtime/maps/arene/map.json').exists(),timeout=10,label='map created')
+        exchange('chat',message='/map edit arene')
+        editor_id=wait_for(lambda:next(iter(core.editors),None),timeout=10,label='editor deployment')
+        wait_for(lambda:processes.status(editor_id)=='ready',label='editor ready')
+        wait_for(lambda:chat_seen('RushBotA','Éditeur de'),timeout=30,label='editor transfer')
+        time.sleep(1)
+        exchange('chat',message='/map gen or');time.sleep(0.5)
+        exchange('chat',message='/map pnj armes bleu');time.sleep(0.5)
+        exchange('chat',message='/map save')
+        def saved():
+            m=json.loads((root/'runtime/maps/arene/map.json').read_text())
+            return m['layout'] is None and (root/'runtime/maps/arene/world/region').is_dir() and m
+        try:
+            saved_map=wait_for(saved,timeout=30,label='map saved')
+        except AssertionError:
+            drain();print('Editor chat:',[e['message'] for e in events if e.get('event')=='chat' and e.get('name')=='RushBotA' and 'sélectionné' not in e['message']][-12:],flush=True)
+            shutil.copy(root/'runtime/servers'/editor_id/'console.log',root/'editor-console.log');shutil.copytree(root/'runtime/servers'/editor_id/'plugins/Rush',root/'editor-rush',symlinks=True);print('Editor console kept in',root/'editor-console.log',flush=True);raise
+        assert len(saved_map['generators'])==6 and len(saved_map['npcs'])==9,(len(saved_map['generators']),len(saved_map['npcs']))
+        regions=list((root/'runtime/maps/arene/world/region').glob('*.mca'))
+        # Region files are written in 4 KiB sectors: any other size means a copy taken mid-write.
+        assert regions and all(r.stat().st_size%4096==0 for r in regions),[(r.name,r.stat().st_size) for r in regions]
+        assert not (root/'runtime/maps/arene/world/playerdata').exists(),'player data leaked into the map'
+        wait_for(lambda:chat_seen('RushBotA','enregistrée'),timeout=15,label='map saved notification')
+        def editor_messages():
+            drain();return sum(e.get('event')=='chat' and e.get('name')=='RushBotA' and 'Éditeur de' in e.get('message','') for e in events)
+        try:
+            wait_for(lambda:editor_messages()>=2,timeout=60,label='editor reopened after save')
+        except AssertionError:
+            for folder in (root/'runtime/servers').glob('edit-*'):shutil.copy(folder/'console.log',root/(folder.name+'-console.log'))
+            drain();print('Bot events:',[e for e in events if e.get('name')=='RushBotA' and e.get('event')!='chat'][-8:],flush=True);raise
+        time.sleep(1)
+        exchange('chat',message='/map quitter')
+        wait_for(lambda:not core.editors,timeout=15,label='editor closed')
+        wait_for(lambda:abs(exchange('state')['position']['x']-0.5)<1,timeout=30,label='editor lobby return')
+        exchange('chat',message='/map enable arene');time.sleep(1)
+        assert json.loads((root/'runtime/maps/arene/map.json').read_text())['enabled']
+        assert Maps(root/'runtime/maps').choose('1v1')[0]['name'] in ('arene','classic')
+        exchange('chat',message='/map disable classic');time.sleep(1)
+        import uuid as _uuid
+        with core.lock:game=core.launch('1v1',[[str(_uuid.uuid4())],[str(_uuid.uuid4())]],False)
+        assert core.active[game]['map']['name']=='arene'
+        game_log=root/'runtime/servers'/game/'plugins/Rush/events-0.jsonl'
+        created=wait_for(lambda:game_log.exists() and next((json.loads(l) for l in game_log.read_text().splitlines() if '"arena_created"' in l),None),timeout=120,label='game on saved map')
+        assert created['map']=='arene' and created['beds']==[True,True] and created['npcs']==9,created
+        core.abort(game,'deployment_test_complete')
+        print('PASS map editor: create, edit, save world + NPC/generator, leave, enable, game on saved map',flush=True)
         exchange('quit')
-        report={'result':'PASS','client':'1.9.4','bot_physics':False,'checks':['lobby','proxy','friends','teams','gui','matchmaking','deployment','transfer','pvp_full_damage','diagnostics','respawn','shop','tnt_launch','own_bed_protection','enemy_bed','elimination','leaderboard','lobby_return','private_match','forfeit'],'workspace':str(root)}
+        report={'result':'PASS','client':'1.9.4','bot_physics':False,'checks':['lobby','proxy','friends','teams','gui','matchmaking','deployment','transfer','pvp_full_damage','diagnostics','respawn','shop','tnt_launch','own_bed_protection','enemy_bed','elimination','leaderboard','lobby_return','private_match','forfeit','notifications','elo_notification','map_editor'],'workspace':str(root)}
         report_path.write_text(json.dumps(report,indent=2))
         print(json.dumps(report,indent=2),flush=True)
     except BaseException as exc:

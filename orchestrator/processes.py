@@ -7,6 +7,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from .maps import copy_world
+
 # Aikar's G1 flags for Paper. -Xms equals -Xmx, but without AlwaysPreTouch: memory is only
 # taken when an instance really needs it, so short matches stay small.
 G1_FLAGS = ['-XX:+UseG1GC', '-XX:+ParallelRefProcEnabled', '-XX:MaxGCPauseMillis=200', '-XX:+UnlockExperimentalVMOptions',
@@ -49,9 +51,14 @@ class Processes:
         self.online_mode = str(not (settings.get('test_offline') or settings.get('offline_mode'))).lower()
 
     def available(self):
-        return sum(n.startswith('rush-') for n in list(self.children)) < self.settings['max_instances']
+        # Games and map editors share the instance budget and the port range.
+        return sum(n not in ('lobby', 'proxy') for n in list(self.children)) < self.settings['max_instances']
+
+    def folder(self, name):
+        return self.root / 'runtime' / 'servers' / name
 
     def start(self, match=None):
+        """Lobby (no match), game (match with teams) or map editor (match with 'editor')."""
         if not self.settings['eula']:
             raise RuntimeError("EULA requise : python3 -m orchestrator.cli init --accept-eula")
         name = match['id'] if match else 'lobby'
@@ -68,6 +75,8 @@ class Processes:
                 if source.is_dir() and not dest.exists():
                     dest.symlink_to(source, target_is_directory=True)
         (folder / 'config').mkdir(exist_ok=True)
+        if match and match.get('world'):
+            copy_world(match['world'], folder / 'world')  # Saved map: each instance plays its own copy.
         shutil.copy2(self.root / 'artifacts' / 'rush-paper.jar', folder / 'plugins' / 'rush-paper.jar')
         shutil.copy2(self.root / 'artifacts' / 'BungeeGuard.jar', folder / 'plugins' / 'BungeeGuard.jar')
         (folder / 'plugins' / 'BungeeGuard').mkdir(exist_ok=True)
@@ -82,7 +91,7 @@ server-port={port}
 online-mode=false
 enforce-secure-profile=false
 spawn-protection=0
-max-players={len(match['teams'][0])*2 if match else 100}
+max-players={4 if match and match.get('editor') else len(match['teams'][0])*2 if match else 100}
 view-distance=4
 simulation-distance=4
 level-type=minecraft:flat
@@ -108,8 +117,10 @@ misc:
   enable-nether: false
 ''')
         payload = dict(api=f"http://127.0.0.1:{self.settings['api_port']}", token=self.token, id=name,
-                       diagnostic=self.settings['diagnostic'], match=match,
-                       pvp=self.settings['pvp'][match['mode'] if match else '1v1'])
+                       diagnostic=self.settings['diagnostic'],
+                       match=match if match and not match.get('editor') else None,
+                       editor={'map': match['editor'], 'owner': match['owner'], 'position': match.get('position')} if match and match.get('editor') else None,
+                       pvp=self.settings['pvp'][match['mode'] if match and 'mode' in match else '1v1'])
         cfg = folder / 'plugins' / 'Rush' / 'instance.json'
         cfg.write_text(json.dumps(payload, indent=2))
         cfg.chmod(0o600)
@@ -190,7 +201,9 @@ enabled = false
         return [{'name':name,'host':'127.0.0.1','port':c['port']} for name,c in list(self.children.items())
                 if name != 'proxy' and not c.get('stopping') and self.status(name) == 'ready']
 
-    def stop(self, name):
+    def stop(self, name, on_exit=None):
+        """Graceful stop. on_exit(folder, clean) runs once the process is gone, before cleanup:
+        clean is True only when Paper shut down by itself (worlds fully written)."""
         c = self.children.get(name)
         if not c or c.get('stopping'):
             return
@@ -205,9 +218,11 @@ enabled = false
                 pass
             import threading
             def reap():
+                clean = True
                 try:
                     p.wait(timeout=20)
                 except subprocess.TimeoutExpired:
+                    clean = False
                     os.killpg(p.pid, signal.SIGTERM)
                     try:
                         p.wait(timeout=10)
@@ -215,21 +230,33 @@ enabled = false
                         os.killpg(p.pid, signal.SIGKILL)
                         p.wait()
                 p.stdin.close()
+                self.exited(name, c, on_exit, clean and p.returncode == 0)
                 self.archive(name, c)
                 self.children.pop(name, None)
             threading.Thread(target=reap, daemon=False).start()
         else:
             if p.stdin:
                 p.stdin.close()
+            self.exited(name, c, on_exit, False)  # Crashed before the stop request.
             self.archive(name, c)
             self.children.pop(name, None)
         self.log('process_stopping', instance=name, pid=p.pid)
 
+    def exited(self, name, child, on_exit, clean):
+        if on_exit:
+            try:
+                on_exit(child['logfile'].parent, clean)
+            except Exception as exc:  # Never let a callback skip the cleanup.
+                self.log('exit_callback_failed', instance=name, error=str(exc))
+
     def archive(self, name, child):
-        if not name.startswith('rush-'):
+        if not name.startswith(('rush-', 'edit-')):
             return
         try:
-            prune_match(child['logfile'].parent)
+            if name.startswith('edit-'):
+                shutil.rmtree(child['logfile'].parent)  # Saved maps live in runtime/maps; nothing else to keep.
+            else:
+                prune_match(child['logfile'].parent)
         except OSError as exc:
             self.log('prune_failed', instance=name, error=str(exc))
 

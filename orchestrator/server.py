@@ -62,6 +62,14 @@ def serve(core, settings, token):
                 elif self.path == '/abort' and post:
                     core.abort(body['match'], body.get('reason','game_abort'))
                     result = {'ok':True}
+                elif self.path == '/profiles' and post:
+                    if not isinstance(body.get('players'), list):
+                        raise RuleError('Liste de joueurs requise')
+                    result = core.profiles(body['players'])
+                elif self.path == '/map/save' and post:
+                    result = core.editor_save(body['instance'], body['map'], bool(body.get('quit')), body.get('position'))
+                elif self.path == '/map/close' and post:
+                    result = core.editor_close(body['instance'])
                 elif self.path == '/role' and post:
                     core.set_role(core.target(body['name']), body['role'])
                     result = {'ok':True}

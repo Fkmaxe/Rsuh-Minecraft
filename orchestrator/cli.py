@@ -128,7 +128,8 @@ def main():
         log = make_logger(runtime/'events.jsonl')
         token = (runtime/'api.token').read_text().strip()
         processes = Processes(ROOT,settings,token,(runtime/'forwarding.secret').read_text().strip(),log)
-        core = Core(runtime/'rush.sqlite3',processes,log,offline=bool(settings.get('offline_mode')))
+        from .maps import Maps
+        core = Core(runtime/'rush.sqlite3',processes,log,offline=bool(settings.get('offline_mode')),maps=Maps(runtime/'maps'))
         if settings.get('offline_mode'):
             log('offline_mode_enabled')
             print('ATTENTION : mode hors ligne, pseudos non vérifiés, parties non classées.', flush=True)
