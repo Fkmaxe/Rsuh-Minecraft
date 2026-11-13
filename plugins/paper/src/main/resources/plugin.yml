@@ -1,0 +1,24 @@
+name: Rush
+version: 1.0.0
+main: fr.rush.paper.RushPlugin
+api-version: '1.21.11'
+description: Rush training, matchmaking and configurable PvP
+load: STARTUP
+depend: [BungeeGuard]
+commands:
+  rush:
+    description: Menu et matchmaking Rush
+    usage: /rush [1v1|2v2|5v5|leave|status|admin]
+  team:
+    description: Équipe persistante
+  friend:
+    aliases: [friends, ami]
+    description: Amis et invitations
+  private:
+    aliases: [prive]
+    description: Parties privées non classées
+  leaderboard:
+    aliases: [top]
+    description: Classement global ou par mode
+  shop:
+    description: Boutique Rush

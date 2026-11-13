@@ -1,0 +1,20 @@
+[Unit]
+Description=Rush Training Network
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rush
+WorkingDirectory=/opt/rush
+ExecStart=/usr/bin/python3 -m orchestrator.cli start --diagnostic
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

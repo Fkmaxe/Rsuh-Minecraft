@@ -1,0 +1,27 @@
+{
+  "paper.jar": {
+    "version": "1.21.11-132",
+    "url": "https://fill-data.papermc.io/v1/objects/5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba/paper-1.21.11-132.jar",
+    "sha256": "5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba"
+  },
+  "velocity.jar": {
+    "version": "3.4.0-563",
+    "url": "https://fill-data.papermc.io/v1/objects/fe53021f3168322cb6cb68f78699866fd098df3c306e4359847a10b0d02689ef/velocity-3.4.0-SNAPSHOT-563.jar",
+    "sha256": "fe53021f3168322cb6cb68f78699866fd098df3c306e4359847a10b0d02689ef"
+  },
+  "BungeeGuard.jar": {
+    "version": "1.4.0",
+    "url": "https://github.com/lucko/BungeeGuard/releases/download/v1.4.0/BungeeGuard.jar",
+    "sha256": "f2f3a3df266b0d3cc241f67bf87d6cdb6f12ecd0d556bd8e07a5e58dcf7e1d47"
+  },
+  "ViaVersion.jar": {
+    "version": "5.12.2",
+    "url": "https://github.com/ViaVersion/ViaVersion/releases/download/5.12.2/ViaVersion-5.12.2.jar",
+    "sha256": "24e4876fefe73e08a4c87cd6c457ee0916e62dd69656631caf41e26f909d504b"
+  },
+  "ViaBackwards.jar": {
+    "version": "5.12.2",
+    "url": "https://github.com/ViaVersion/ViaBackwards/releases/download/5.12.2/ViaBackwards-5.12.2.jar",
+    "sha256": "9a148a80ea22074f4bd1626cdbe254a4cd998bf44e7ceaff4e285a1b6b35da42"
+  }
+}

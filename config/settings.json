@@ -1,0 +1,19 @@
+{
+  "host": "127.0.0.1",
+  "api_port": 8787,
+  "proxy_port": 25565,
+  "lobby_port": 25566,
+  "first_match_port": 25600,
+  "max_instances": 4,
+  "memory_mb": 1024,
+  "startup_timeout": 180,
+  "match_timeout": 2400,
+  "java": "java",
+  "diagnostic": false,
+  "eula": false,
+  "pvp": {
+    "1v1": {"attack_speed": 1024, "hurt_ticks": 20, "knockback_horizontal": 0.38, "knockback_vertical": 0.34, "tnt_horizontal": 1.5, "tnt_vertical": 0.85, "knockback_sprint_horizontal": 0.5, "knockback_sprint_vertical": 0.1},
+    "2v2": {"attack_speed": 1024, "hurt_ticks": 20, "knockback_horizontal": 0.38, "knockback_vertical": 0.34, "tnt_horizontal": 1.5, "tnt_vertical": 0.85, "knockback_sprint_horizontal": 0.5, "knockback_sprint_vertical": 0.1},
+    "5v5": {"attack_speed": 1024, "hurt_ticks": 20, "knockback_horizontal": 0.38, "knockback_vertical": 0.34, "tnt_horizontal": 1.5, "tnt_vertical": 0.85, "knockback_sprint_horizontal": 0.5, "knockback_sprint_vertical": 0.1}
+  }
+}
