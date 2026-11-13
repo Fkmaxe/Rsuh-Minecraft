@@ -1,5 +1,5 @@
 name: Rush
-version: 1.1.0
+version: 1.2.0
 main: fr.rush.paper.RushPlugin
 api-version: '1.21.11'
 description: Rush training, matchmaking and configurable PvP
@@ -26,3 +26,39 @@ commands:
   map:
     aliases: [maps]
     description: Maps (administrateurs) et éditeur de map
+  staff:
+    aliases: [mod]
+    description: Menu de modération (staff)
+  spec:
+    description: Regarder la partie d'un joueur en vanish (staff)
+  vanish:
+    aliases: [v]
+    description: Devenir invisible des joueurs (staff)
+  freeze:
+    aliases: [gel]
+    description: Geler ou dégeler un joueur (staff)
+  kick:
+    description: Expulser un joueur du réseau (staff)
+  ban:
+    description: Bannir un joueur, durée 30m 2h 7d perm (staff)
+  unban:
+    description: Lever un bannissement (staff)
+  mute:
+    description: Rendre un joueur muet (staff)
+  unmute:
+    description: Lever un mute (staff)
+  warn:
+    description: Avertir un joueur (staff)
+  history:
+    aliases: [sanctions]
+    description: Historique des sanctions (staff)
+  report:
+    aliases: [signaler]
+    description: Signaler un joueur au staff
+  sc:
+    aliases: [staffchat]
+    description: Chat privé du staff
+  invsee:
+    description: Voir l'inventaire d'un joueur (staff)
+  goto:
+    description: Se téléporter sur un joueur du même serveur (staff)

@@ -106,6 +106,40 @@ Le matchmaking forme deux équipes de taille exacte en conservant les groupes. U
 
 Rôles centralisés : `player`, `moderator`, `admin`. L’attribution initiale se fait avec la CLI locale. Les comptes doivent s’être connectés au moins une fois pour être ciblés. Les permissions sont contrôlées côté API, avec les UUID authentifiés du proxy ; elles ne reposent pas sur une valeur envoyée par le client Minecraft.
 
+### Modération (modérateurs et administrateurs)
+
+`/staff` (ou le bouton Staff du menu) ouvre le menu de modération : vanish, parties en cours (regarder, annuler), joueurs connectés avec leurs actions, signalements et chat staff.
+
+| Commande | Usage |
+|---|---|
+| `/spec <pseudo\|id>` | Rejoindre la partie en spectateur, vanish automatique ; `/rush leave` pour revenir |
+| `/vanish` | Invisible des joueurs (monde et TAB) ; le staff se voit entre lui. Le chat public est bloqué en vanish |
+| `/freeze <pseudo>` | Geler / dégeler : ni déplacement, ni combat, ni construction, ni commande, invulnérable. Une déconnexion pendant un freeze alerte le staff (bouton « Bannir 7 j ») |
+| `/invsee <pseudo>`, `/goto <pseudo>` | Inventaire en lecture seule (armure, vie, ping) et téléportation, sur le même serveur (en spec pendant une partie) |
+| `/warn <pseudo> <raison>` | Avertissement affiché au joueur et enregistré |
+| `/mute <pseudo> <30m\|2h\|7d\|perm> [raison]`, `/unmute` | Silence sur tous les serveurs |
+| `/kick <pseudo> [raison]` | Expulsion du réseau |
+| `/ban <pseudo> <durée\|perm> [raison]`, `/unban` | Bannissement vérifié par le proxy à la connexion ; un modérateur est limité à 7 jours |
+| `/history <pseudo>` | Historique des sanctions (date, durée, auteur, raison, actif ou levé) |
+| `/sc <message>` | Chat privé du staff |
+| `/report <pseudo> <raison>` | Pour tous : alerte le staff connecté avec boutons [Spec] [Freeze] [Historique] (1 par minute) |
+
+Seul un administrateur peut sanctionner un membre du staff. Les sanctions et signalements sont en base (`sanctions`, `reports`) et dans `runtime/events.jsonl`. Le texte saisi par les joueurs ne peut pas injecter de mise en forme ni de boutons. En mode hors ligne, les outils en jeu sont désactivés et la console reste disponible : `rush mod ban <pseudo> 7d triche`, `rush mod unban|kick|mute|unmute|warn|history <pseudo> …`.
+
+### Historique des parties
+
+Chaque partie a son fichier JSON lisible dans `runtime/history/<année-mois>/<id>.json` : mode, carte, classée ou non, statut (`en_cours`, `terminee`, `annulee` avec sa raison), début, fin, durée, vainqueur, et pour chaque joueur kills, morts, lits et **Elo avant, après et variation**. Le fichier contient aussi la `chronologie` (début, morts avec le tueur, chute dans le vide et élimination, lits détruits, abandons, mort subite, fin), relevée dans le journal du serveur de jeu à son arrêt. La section `moderation` liste, avec heure et auteur, les actions du staff pendant la partie : spectateurs, **freeze et dégel**, avertissements, mutes, kicks, bans et déconnexions pendant un freeze.
+
+```sh
+rush games                      # 20 dernières parties
+rush games --player Pseudo      # parties d’un joueur
+rush game rush-69ba9218cb62     # fichier complet
+```
+
+Une partie coupée par un redémarrage du réseau est marquée `annulee` (`redemarrage_superviseur`). Les tests de déploiement (`deploy-test`) ne sont pas enregistrés. Chaque fichier fait quelques Ko : à inclure dans les sauvegardes et à purger selon la durée de conservation choisie.
+
+Les freezes sont aussi conservés en base avec leur durée (`/history <pseudo>` affiche par exemple « freeze (4 min) » ou « en cours »), et un freeze en cours est rétabli après un redémarrage du réseau.
+
 ### Éditeur de maps
 
 `/map edit <nom>` ouvre une instance dédiée, et l’admin y est transféré en créatif. La map y est construite librement. L’étoile du Nether (ou `/map` dans l’éditeur) ouvre le menu d’édition :

@@ -70,6 +70,16 @@ def serve(core, settings, token):
                     result = core.editor_save(body['instance'], body['map'], bool(body.get('quit')), body.get('position'))
                 elif self.path == '/map/close' and post:
                     result = core.editor_close(body['instance'])
+                elif self.path == '/login' and post:
+                    result = core.moderation.login(body['id'], body['name'])
+                elif self.path == '/admission' and post:
+                    result = core.moderation.admission(body['instance'], body['player'])
+                elif self.path == '/moderation' and post:
+                    if not isinstance(body.get('players'), list):
+                        raise RuleError('Liste de joueurs requise')
+                    result = core.moderation.state([str(p) for p in body['players']])
+                elif self.path == '/moderate' and post:
+                    result = core.moderation.console(body['action'], body['name'], [str(a) for a in body.get('args', [])])
                 elif self.path == '/role' and post:
                     core.set_role(core.target(body['name']), body['role'])
                     result = {'ok':True}
@@ -81,7 +91,7 @@ def serve(core, settings, token):
                     if mode not in MODES:
                         raise RuleError('Mode invalide')
                     with core.lock:
-                        mid = core.launch(mode, [[str(uuid.uuid4()) for _ in range(MODES[mode])] for _ in range(2)], False)
+                        mid = core.launch(mode, [[str(uuid.uuid4()) for _ in range(MODES[mode])] for _ in range(2)], False, record=False)
                     result = {'match':mid}
                 else:
                     return self.respond(404, {'error':'Route inconnue'})

@@ -38,6 +38,9 @@ readline.createInterface({input:process.stdin}).on('line', async line=> {
       const block=bot.blockAt(new Vec3(...req.position));if(!block)throw new Error('Block not loaded');
       await bot.dig(block);result={block:block.name};
     }
+    if(req.action==='players') result=Object.keys(bot.players);
+    if(req.action==='reconnect'){const again=mineflayer.createBot({host:'127.0.0.1',port:Number(process.argv[2]),username:req.name,auth:'offline',version:'1.9.4',hideErrors:true,physicsEnabled:false});
+      result=await new Promise(done=>{again.once('spawn',()=>{again.quit();done('spawned');});again.once('kicked',r=>done('kicked:'+r));again.once('error',e=>done('error:'+e));setTimeout(()=>done('timeout'),15000);});}
     if(req.action==='quit'){for(const b of Object.values(bots))b.quit();setTimeout(()=>process.exit(0),500);result=true;}
     output({id:req.id,result});
   } catch(error){output({id:req?.id,error:String(error)});}

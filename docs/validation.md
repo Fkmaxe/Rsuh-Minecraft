@@ -49,6 +49,16 @@ Ces essais ont corrigé deux défauts réels. Le premier : copier le monde d’u
 
 Le rendu visuel (couleurs, scoreboard, titres) n’est pas vérifiable par les bots : à contrôler en jeu avec le client 1.9.4.
 
+## Modération
+
+`tests/test_moderation.py` (12 tests) couvre : refus des outils pour les joueurs, bannissement refusé à la connexion et expulsion, limite des modérateurs et protection du staff, expiration des mutes, échappement du texte des joueurs, freeze et alerte de déconnexion, spectateur admis seulement sur sa partie et retiré à la fin, vanish caché aux joueurs, signalements limités, chat staff, historique, mode hors ligne avec console.
+
+Le test de bout en bout vérifie avec les clients 1.9.4 : disparition du TAB en vanish et réapparition, freeze avec commandes bloquées puis dégel, spec d'une vraie partie (le joueur ne voit pas le spectateur), `/invsee`, retour au lobby, mute appliqué (message non diffusé), signalement reçu par le staff, menu staff, bannissement avec expulsion puis reconnexion refusée.
+
+## Historique des parties
+
+`tests/test_history.py` (4 tests) vérifie le fichier d'une partie classée (statut, vainqueur, statistiques, Elo avant et après), la chronologie reconstruite depuis un journal d'événements, les freezes notés dans la partie, conservés en base avec leur durée et rétablis après redémarrage, l'annulation, la partie interrompue par un redémarrage, l'exclusion des tests de déploiement et la recherche par joueur. Le test de bout en bout contrôle le fichier d'une vraie partie classée (chronologie début, mort, lit détruit, fin ; Elo ±16) et celui d'une partie observée par le staff (spectateur, freeze, dégel, auteur).
+
 ## Limites à respecter
 
 - Ces tests utilisent une authentification offline sur un proxy de test limité à `127.0.0.1`. Le réseau normal conserve l’authentification Microsoft/Mojang ; aucune connexion avec un compte officiel réel n’a été effectuée ici.

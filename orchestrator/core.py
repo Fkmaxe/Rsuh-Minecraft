@@ -43,11 +43,12 @@ def side_name(side):
 
 
 class Core:
-    def __init__(self, db: Path, deployer, log=lambda *a, **k: None, offline=False, maps=None, stop_delay=3.0):
+    def __init__(self, db: Path, deployer, log=lambda *a, **k: None, offline=False, maps=None, stop_delay=3.0, history=None):
         # Offline mode: names are not verified, so nothing may depend on identity
         # (no ranked results, no in-game administration).
         self.offline = offline
         self.maps = maps
+        self.history = history
         self.lock = threading.RLock()
         self.db = sqlite3.connect(db, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
@@ -63,7 +64,10 @@ class Core:
             PRIMARY KEY(player,mode));
         """)
         # Children are stopped on supervisor exit; unfinished results never count.
+        interrupted = [r[0] for r in self.db.execute("SELECT id FROM matches WHERE state NOT IN ('finished','aborted')")]
         self.db.execute("UPDATE matches SET state='aborted' WHERE state NOT IN ('finished','aborted')")
+        if history:
+            history.mark_interrupted(interrupted)
         self.db.commit()
         self.deployer, self.log = deployer, log
         self.online = set()
@@ -80,6 +84,8 @@ class Core:
         self.stopping = {}
         self.last_presence = time.monotonic()
         self.deployment_retry_at = 0
+        from .moderation import Moderation  # Imports this module: loaded once Core exists.
+        self.moderation = Moderation(self)
 
     # ---------------------------------------------------------------- identity
     def register(self, player, name):
@@ -167,13 +173,17 @@ class Core:
             if not self.presence_seen:  # First report after (re)start: no join/leave spam.
                 self.presence_seen = True
                 return
+            hidden = self.moderation.vanished
             for p in self.online - before:
-                for f in self.friends_of(p):
-                    self.notify(f, f"<green>●</green> <yellow>{self.name(p)}</yellow> <gray>est en ligne.</gray>")
+                if p not in hidden:
+                    for f in self.friends_of(p):
+                        self.notify(f, f"<green>●</green> <yellow>{self.name(p)}</yellow> <gray>est en ligne.</gray>")
                 self.welcome(p)
             for p in before - self.online:
-                for f in self.friends_of(p):
-                    self.notify(f, f"<red>●</red> <yellow>{self.name(p)}</yellow> <gray>s’est déconnecté.</gray>")
+                if p not in hidden:
+                    for f in self.friends_of(p):
+                        self.notify(f, f"<red>●</red> <yellow>{self.name(p)}</yellow> <gray>s’est déconnecté.</gray>")
+                self.moderation.left(p)
                 self.notes.pop(p, None)
 
     # ---------------------------------------------------------------- commands
@@ -181,6 +191,8 @@ class Core:
         with self.lock:
             p = self.register(player, name)
             args = [str(a) for a in args]
+            if action in self.moderation_actions():
+                return self.moderation.command(p, action, args)
             if action == 'queue':
                 mode = args[0] if args else ''
                 if mode not in MODES:
@@ -214,6 +226,7 @@ class Core:
                         self.notify_all(room['players'], f"<red>-</red> <yellow>{self.name(p)}</yellow> <gray>a quitté le salon.</gray>")
                 # During a match, proxy transfers to lobby and game treats this as forfeit.
                 self.routes.pop(p, None)
+                self.moderation.stop_spectating(p)
                 return self.message("<gray>Retour au lobby.</gray>")
             if action == 'team':
                 return self.team(p, args)
@@ -243,7 +256,8 @@ class Core:
                                   f"<gray>File :</gray> <white>{sum(len(q['players']) for q in self.queue)} joueurs</white>", f"<gray>Parties :</gray> <white>{len(self.active)}</white>"]
                         + (['<red>Mode hors ligne : parties non classées</red>'] if self.offline else []), 'role': role}
             if action == 'players':
-                names = sorted(self.name(uid) for uid in self.online if uid != p)
+                staff = self.moderation.is_staff(p)
+                names = sorted(self.name(uid) for uid in self.online if uid != p and (staff or uid not in self.moderation.vanished))
                 return {'message': '<gray>Joueurs connectés</gray>', 'lines': names, 'players': names}
             if action == 'admin':
                 if self.offline:
@@ -264,6 +278,11 @@ class Core:
                                   + button('Annuler', f'/rush admin abort {mid}', 'red', 'Annuler sans résultat') for mid, m in self.active.items()]
                         or ['<gray>Aucune partie en cours.</gray>']}
             raise RuleError("Commande inconnue")
+
+    @staticmethod
+    def moderation_actions():
+        from .moderation import ACTIONS
+        return ACTIONS
 
     @staticmethod
     def message(text):
@@ -597,7 +616,13 @@ class Core:
             return {'ok': True}
 
     # ----------------------------------------------------------------- matches
-    def launch(self, mode, teams, ranked):
+    def record_note(self, p, action, **fields):
+        """Moderation action about a player currently in a game: kept in that game's history file."""
+        match = self.active.get(self.routes.get(p))
+        if match and match.get('record') and self.history:
+            self.history.note(match['record'], action, **fields)
+
+    def launch(self, mode, teams, ranked, record=True):
         if not self.deployer.available():
             raise RuleError("Capacité atteinte, réessayez dans quelques instants")
         ranked = ranked and not self.offline
@@ -613,6 +638,8 @@ class Core:
             self.log('deployment_failed', match=mid, error=str(exc))
             raise RuleError("Déploiement indisponible ; la file est conservée") from exc
         self.active[mid] = match
+        if self.history and record:
+            match['record'] = self.history.begin(match, self.name)
         for p in itertools.chain.from_iterable(teams):
             self.routes[p] = mid
         with self.db:
@@ -691,7 +718,7 @@ class Core:
                       if (mid in self.active and self.active[mid]['state'] == 'ready')
                       or (mid in self.editors and not self.editors[mid].get('saving') and self.deployer.status(mid) == 'ready')}
             messages, self.notes = self.notes, {}
-            return {'servers': self.deployer.servers(), 'routes': routes, 'messages': messages}
+            return {'servers': self.deployer.servers(), 'routes': routes, 'messages': messages, 'kicks': self.moderation.pop_kicks()}
 
     def profiles(self, ids):
         """Data for the lobby TAB, scoreboard and menus."""
@@ -733,7 +760,7 @@ class Core:
             for data in stats.values():
                 if not isinstance(data, dict) or any(type(data.get(k)) is not int or not 0 <= data[k] <= 10000 for k in ('kills', 'deaths', 'beds')):
                     raise RuleError("Statistiques invalides")
-            changes = {}
+            changes, before_after = {}, {}
             with self.db:
                 if row['ranked']:
                     for mode in (row['mode'], 'global'):
@@ -750,7 +777,11 @@ class Core:
                                                 (int(side == winner), int(side != winner), s['kills'], s['deaths'], s['beds'], delta, p, mode))
                                 if mode == row['mode']:
                                     changes[p] = (delta, max(0, ratings[p] + delta))
+                                    before_after[p] = (ratings[p], max(0, ratings[p] + delta))
                 self.db.execute("UPDATE matches SET state='finished',winner=? WHERE id=?", (winner, mid))
+            record = self.active.get(mid, {}).get('record')
+            if record:
+                self.history.finish(record, winner, stats, before_after)
             self.release(mid)
             self.log('match_finished', match=mid, winner=winner, ranked=bool(row['ranked']))
             for side, team in enumerate(teams):
@@ -774,9 +805,12 @@ class Core:
             self.stopping[name] = (time.monotonic() + self.stop_delay, on_exit)
 
     def release(self, mid):
-        self.active.pop(mid, None)
+        match = self.active.pop(mid, None) or {}
         self.routes = {p: m for p, m in self.routes.items() if m != mid}
-        self.stop_later(mid)
+        self.moderation.release(mid)
+        record = match.get('record')
+        # The timeline comes from the game's own event log, complete once the server has stopped.
+        self.stop_later(mid, (lambda folder, clean: self.history.timeline(record, folder)) if record else None)
 
     def abort(self, mid, reason):
         with self.lock:
@@ -788,6 +822,8 @@ class Core:
             match = self.active[mid]
             with self.db:
                 self.db.execute("UPDATE matches SET state='aborted' WHERE id=?", (mid,))
+            if match.get('record'):
+                self.history.abort(match['record'], reason)
             self.release(mid)
             self.log('match_aborted', match=mid, reason=reason)
             if reason in ABORT_REASONS:

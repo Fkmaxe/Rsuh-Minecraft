@@ -19,6 +19,7 @@ sys.path.insert(0,str(ROOT))
 from orchestrator.cli import read_settings
 from orchestrator.core import Core
 from orchestrator.maps import Maps
+from orchestrator.history import History
 from orchestrator.processes import Processes
 from orchestrator.protocol import ping
 from orchestrator.server import serve, make_logger
@@ -44,7 +45,8 @@ def main():
     token=secrets.token_hex(32)
     log=make_logger(root/'runtime/events.jsonl')
     processes=Processes(root,settings,token,secrets.token_hex(32),log)
-    core=Core(root/'runtime/rush.sqlite3',processes,log,maps=Maps(root/'runtime/maps'))
+    history=History(root/'runtime/history')
+    core=Core(root/'runtime/rush.sqlite3',processes,log,maps=Maps(root/'runtime/maps'),history=history)
     server=serve(core,settings,token)
     stop=threading.Event()
     def ticker():
@@ -164,6 +166,15 @@ def main():
         print('PASS bed protection + bed destruction + elimination + ranked result + Elo notification',flush=True)
         wait_for(lambda:all(abs(exchange('state',name=n)['position']['x']-0.5)<1 for n in ('RushBotA','RushBotB')),timeout=30,label='lobby return')
         print('PASS automatic lobby return',flush=True)
+        def ranked_record():
+            path=history.find(mid);record=path and json.loads(path.read_text())
+            return record if record and record['chronologie'] else None
+        record=wait_for(ranked_record,timeout=40,label='game history timeline')
+        assert record['statut']=='terminee' and record['vainqueur'] in ('rouge','bleu') and record['classee'],record
+        steps=[e['evenement'] for e in record['chronologie']]
+        assert steps[0]=='debut' and 'lit_detruit' in steps and 'mort' in steps and steps[-1]=='fin',steps
+        assert all(row['elo_variation'] in (16,-16) for team in record['equipes'].values() for row in team),record['equipes']
+        print('PASS game history JSON: result, Elo before/after, timeline',flush=True)
         wins_before=core.db.execute('SELECT sum(wins) FROM stats').fetchone()[0]
         exchange('chat',message='/private create 1v1')
         code=wait_for(lambda:next(iter(core.rooms),None),timeout=10,label='private room')
@@ -226,8 +237,56 @@ def main():
         assert created['map']=='arene' and created['beds']==[True,True] and created['npcs']==9,created
         core.abort(game,'deployment_test_complete')
         print('PASS map editor: create, edit, save world + NPC/generator, leave, enable, game on saved map',flush=True)
+        # Moderation: vanish, freeze, spectate in vanish + inventory, mute, report, staff menu, ban.
+        wait_for(lambda:abs(exchange('state')['position']['x']-0.5)<1,timeout=30,label='lobby before moderation')
+        exchange('chat',message='/vanish')
+        wait_for(lambda:'RushBotA' not in exchange('players',name='RushBotB'),timeout=10,label='vanished from TAB')
+        exchange('chat',message='/vanish')
+        wait_for(lambda:'RushBotA' in exchange('players',name='RushBotB'),timeout=10,label='visible again')
+        exchange('chat',message='/freeze RushBotB')
+        wait_for(lambda:chat_seen('RushBotB','Tu es gelé'),timeout=10,label='freeze notification');time.sleep(1.5)
+        exchange('chat',name='RushBotB',message='/rush 1v1')
+        wait_for(lambda:chat_seen('RushBotB','Commandes bloquées'),timeout=10,label='frozen command blocked')
+        exchange('chat',message='/freeze RushBotB')
+        wait_for(lambda:chat_seen('RushBotB','plus gelé'),timeout=10,label='unfreeze')
+        with core.lock:watched=core.launch('1v1',[[core.target('RushBotB')],[str(_uuid.uuid4())]],False)
+        wait_for(lambda:processes.status(watched)=='ready' and core.active[watched]['state']=='ready',timeout=120,label='watched game')
+        wait_for(lambda:chat_seen('RushBotB','Tu joues dans l’équipe'),timeout=30,label='player in watched game')
+        exchange('chat',message='/spec RushBotB')
+        wait_for(lambda:chat_seen('RushBotA','Tu observes'),timeout=30,label='spectator transfer')
+        time.sleep(2)
+        assert 'RushBotA' not in exchange('players',name='RushBotB'),'spectator visible to the player'
+        exchange('chat',message='/freeze RushBotB')
+        wait_for(lambda:chat_seen('RushBotB','Tu es gelé'),timeout=10,label='freeze in game')
+        exchange('chat',message='/freeze RushBotB');time.sleep(1)
+        exchange('chat',message='/invsee RushBotB');time.sleep(1)
+        assert 'Inventaire' in str(exchange('state')['window']),exchange('state')['window']
+        exchange('close')
+        exchange('chat',message='/rush leave')
+        wait_for(lambda:abs(exchange('state')['position']['x']-0.5)<1,timeout=30,label='spectator back to lobby')
+        core.abort(watched,'moderation')
+        watched_record=json.loads(history.find(watched).read_text())
+        actions=[m['action'] for m in watched_record['moderation']]
+        assert actions==['spectateur_staff','freeze','degel'] and watched_record['statut']=='annulee',(actions,watched_record['statut'])
+        assert watched_record['moderation'][1]['par']=='RushBotA'
+        wait_for(lambda:abs(exchange('state',name='RushBotB')['position']['x']-0.5)<1,timeout=30,label='player back to lobby')
+        exchange('chat',message='/mute RushBotB 30m spam');time.sleep(1.5)
+        exchange('chat',name='RushBotB',message='message interdit')
+        wait_for(lambda:chat_seen('RushBotB','réduit au silence'),timeout=10,label='mute enforced')
+        assert not chat_seen('RushBotA','message interdit'),'muted message delivered'
+        exchange('chat',message='/unmute RushBotB')
+        exchange('chat',name='RushBotB',message='/report RushBotA test signalement')
+        wait_for(lambda:chat_seen('RushBotA','Signalement') and chat_seen('RushBotA','[Spec]'),timeout=10,label='report to staff')
+        exchange('chat',message='/staff');time.sleep(1)
+        assert 'Staff' in str(exchange('state')['window']),exchange('state')['window']
+        exchange('close')
+        exchange('chat',message='/ban RushBotB 1h triche')
+        wait_for(lambda:(drain() or True) and any(e.get('event')=='kicked' and e.get('name')=='RushBotB' and 'banni' in str(e.get('reason')) for e in events),timeout=10,label='ban kick')
+        again=exchange('reconnect',name='RushBotB')
+        assert again.startswith('kicked') and 'banni' in again,again
+        print('PASS moderation: vanish, freeze, spectate in vanish + invsee, mute, report, staff menu, ban',flush=True)
         exchange('quit')
-        report={'result':'PASS','client':'1.9.4','bot_physics':False,'checks':['lobby','proxy','friends','teams','gui','matchmaking','deployment','transfer','pvp_full_damage','diagnostics','respawn','shop','tnt_launch','own_bed_protection','enemy_bed','elimination','leaderboard','lobby_return','private_match','forfeit','notifications','elo_notification','map_editor'],'workspace':str(root)}
+        report={'result':'PASS','client':'1.9.4','bot_physics':False,'checks':['lobby','proxy','friends','teams','gui','matchmaking','deployment','transfer','pvp_full_damage','diagnostics','respawn','shop','tnt_launch','own_bed_protection','enemy_bed','elimination','leaderboard','lobby_return','private_match','forfeit','notifications','elo_notification','map_editor','moderation','game_history'],'workspace':str(root)}
         report_path.write_text(json.dumps(report,indent=2))
         print(json.dumps(report,indent=2),flush=True)
     except BaseException as exc:

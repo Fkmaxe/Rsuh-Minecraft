@@ -2,7 +2,10 @@ package fr.rush.proxy;
 
 import com.google.gson.*;
 import com.google.inject.Inject;
+import com.velocitypowered.api.event.EventTask;
+import com.velocitypowered.api.event.ResultedEvent;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.player.ServerPreConnectEvent;
 import com.velocitypowered.api.plugin.Plugin;
@@ -75,6 +78,8 @@ public final class RushProxy {
                 }
             }
             if (data.has("messages")) deliver(data.getAsJsonObject("messages"));
+            if (data.has("kicks")) for (Map.Entry<String,JsonElement> kick : data.getAsJsonObject("kicks").entrySet())
+                proxy.getPlayer(UUID.fromString(kick.getKey())).ifPresent(p -> p.disconnect(MiniMessage.miniMessage().deserialize(kick.getValue().getAsString())));
             for (RegisteredServer s : proxy.getAllServers()) {
                 String name=s.getServerInfo().getName();
                 if (dynamic(name) && !live.contains(name) && s.getPlayersConnected().isEmpty()) proxy.unregisterServer(s.getServerInfo());
@@ -95,6 +100,21 @@ public final class RushProxy {
                 catch (RuntimeException e) { log.warn("Invalid notification: {}", e.toString()); }
             }
         }
+    }
+
+    /** Bans are checked once the account is authenticated. If the API is down, players are let in (logged). */
+    @Subscribe public EventTask login(LoginEvent event) {
+        return EventTask.async(() -> {
+            try {
+                JsonObject body = new JsonObject();
+                body.addProperty("id", event.getPlayer().getUniqueId().toString()); body.addProperty("name", event.getPlayer().getUsername());
+                JsonObject result = call("/login", body);
+                if (!result.get("allowed").getAsBoolean())
+                    event.setResult(ResultedEvent.ComponentResult.denied(MiniMessage.miniMessage().deserialize(result.get("reason").getAsString())));
+            } catch (Exception e) {
+                log.warn("Ban check unavailable for {}: {}", event.getPlayer().getUsername(), e.toString());
+            }
+        });
     }
 
     @Subscribe public void admission(ServerPreConnectEvent event) {

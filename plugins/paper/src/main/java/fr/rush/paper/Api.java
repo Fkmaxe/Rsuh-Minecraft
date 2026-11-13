@@ -29,6 +29,15 @@ final class Api implements AutoCloseable {
             }
         });
     }
+    /** Blocking call: only from Paper's async threads (pre-login), never from the main thread. */
+    JsonObject postSync(String path,JsonObject data) throws Exception {
+        HttpRequest req=HttpRequest.newBuilder(URI.create(plugin.config.get("api").getAsString()+path))
+            .timeout(Duration.ofSeconds(4)).header("Authorization","Bearer "+plugin.config.get("token").getAsString())
+            .header("Content-Type","application/json").POST(HttpRequest.BodyPublishers.ofString(data.toString())).build();
+        HttpResponse<String> response=client.send(req,HttpResponse.BodyHandlers.ofString());
+        if(response.statusCode()!=200) throw new IllegalStateException("API "+response.statusCode());
+        return JsonParser.parseString(response.body()).getAsJsonObject();
+    }
     void command(Player player,String action,String[] args,Consumer<JsonObject> consumer) {
         query(player,action,args,consumer,message->Text.error(player,message));
     }

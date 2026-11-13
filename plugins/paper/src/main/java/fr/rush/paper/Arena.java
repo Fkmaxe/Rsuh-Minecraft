@@ -30,6 +30,7 @@ final class Arena implements Listener {
     private final Map<UUID,Long> lastHit=new HashMap<>();
     private final Map<UUID,Long> protectedUntil=new HashMap<>();
     private final Map<UUID,GameMap.Npc> npcEntities=new HashMap<>();
+    private final Set<UUID> spectators=java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final boolean[] beds={true,true};
     private String state="waiting";
     private int seconds, countdown=5, elapsed;
@@ -117,7 +118,7 @@ final class Arena implements Listener {
             for(GameMap.Gen gen:map.generators)
                 if(elapsed%GameMap.generatorPeriod(gen.type)==0)resource(new Location(plugin.world,gen.x,gen.y,gen.z),GameMap.generatorItem(gen.type));
             if(elapsed==SUDDEN_DEATH-60)broadcast("<yellow>⚠ Mort subite dans 1 minute :</yellow> <gray>les lits seront détruits.</gray>");
-            if(elapsed==SUDDEN_DEATH){destroyBed(0);destroyBed(1);broadcast("<red><bold>Mort subite !</bold></red> <gray>Les lits sont détruits.</gray>");
+            if(elapsed==SUDDEN_DEATH){destroyBed(0);destroyBed(1);plugin.event("sudden_death",Map.of(),false);broadcast("<red><bold>Mort subite !</bold></red> <gray>Les lits sont détruits.</gray>");
                 for(Player p:Bukkit.getOnlinePlayers())Text.title(p,"<red><bold>MORT SUBITE","<gray>Plus aucune réapparition",5,40,10);everyone(Sound.ENTITY_ENDER_DRAGON_GROWL,1f);}
             if(elapsed>=TIME_LIMIT)abort("draw_time_limit");
             if(elapsed%30==0)plugin.event("performance",Map.of("tps",Bukkit.getTPS()[0],"players",Bukkit.getOnlinePlayers().size()),true);
@@ -175,11 +176,35 @@ final class Arena implements Listener {
     }
 
     // ------------------------------------------------------------------ connections
+    /** Staff spectators are admitted by the orchestrator (async thread: a blocking call is fine here). */
+    @EventHandler public void preLogin(AsyncPlayerPreLoginEvent e) {
+        UUID id=e.getUniqueId();
+        if(sides.containsKey(id))return;
+        try {
+            JsonObject body=new JsonObject();body.addProperty("instance",plugin.config.get("id").getAsString());body.addProperty("player",id.toString());
+            if(plugin.api.postSync("/admission",body).get("spectator").getAsBoolean()){spectators.add(id);return;}
+        } catch(Exception ex){plugin.getLogger().warning("Admission spectateur impossible : "+ex);}
+        e.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER,Text.mm("<red>Tu n’es pas inscrit à cette partie."));
+    }
     @EventHandler public void login(PlayerLoginEvent e) {
-        if(!sides.containsKey(e.getPlayer().getUniqueId()))e.disallow(PlayerLoginEvent.Result.KICK_OTHER,Text.mm("<red>Tu n’es pas inscrit à cette partie."));
+        UUID id=e.getPlayer().getUniqueId();
+        if(!sides.containsKey(id)&&!spectators.contains(id))e.disallow(PlayerLoginEvent.Result.KICK_OTHER,Text.mm("<red>Tu n’es pas inscrit à cette partie."));
+    }
+    private void spectate(Player p) {
+        p.setScoreboard(board);p.getInventory().clear();p.setGameMode(GameMode.SPECTATOR);
+        p.teleport(new Location(plugin.world,map.borderX,spawn(0).getY()+12,map.borderZ,0,60));
+        Text.title(p,"<aqua><bold>Spectateur","<gray>Vanish actif • les joueurs ne te voient pas",10,50,10);
+        Text.send(p,"<aqua>Tu observes</aqua> <white>"+plugin.config.get("id").getAsString()+"</white> <gray>("+mode+" • "+map.name+").</gray> "
+            +"<click:run_command:'/staff'><hover:show_text:\"<gray>Outils de modération\"><aqua><bold>[Menu staff]</bold></aqua></hover></click> "
+            +"<click:run_command:'/rush leave'><hover:show_text:\"<gray>Retour au lobby\"><red><bold>[Quitter]</bold></red></hover></click>");
+        p.sendMessage(Text.mm("  <gray>• Touches numériques (mode spectateur) ou</gray> <white>/goto <pseudo></white><gray> : suivre un joueur.</gray>".replace("<pseudo>","\\<pseudo>")));
+        p.sendMessage(Text.mm("  <gray>•</gray> <white>/invsee</white><gray>,</gray> <white>/freeze</white><gray>,</gray> <white>/kick</white><gray>,</gray> <white>/mute</white><gray>,</gray> <white>/ban</white><gray> fonctionnent ici.</gray>"));
+        plugin.event("spectator_joined",Map.of("player",p.getUniqueId().toString()),false);
     }
     @EventHandler public void join(PlayerJoinEvent e) {
-        Player p=e.getPlayer();Integer side=sides.get(p.getUniqueId());if(side==null)return;
+        Player p=e.getPlayer();
+        if(spectators.contains(p.getUniqueId())&&!sides.containsKey(p.getUniqueId())){spectate(p);return;}
+        Integer side=sides.get(p.getUniqueId());if(side==null)return;
         p.setScoreboard(board);teams[side].addEntry(p.getName());
         p.teleport(spawn(side));p.getInventory().clear();
         p.setGameMode(eliminated.contains(p.getUniqueId())?GameMode.SPECTATOR:GameMode.ADVENTURE);
@@ -319,7 +344,9 @@ final class Arena implements Listener {
             :(void_?"<gray>a été poussé dans le vide par</gray> ":"<gray>a été tué par</gray> ")+colored(killer)+"<gray>.</gray>";
         broadcast(colored(id)+" "+how+(finalKill?" <dark_red><bold>ÉLIMINÉ</bold></dark_red>":""));
         if(killer!=null){Player k=Bukkit.getPlayer(killer);if(k!=null){Text.sound(k,finalKill?Sound.ENTITY_PLAYER_LEVELUP:Sound.ENTITY_EXPERIENCE_ORB_PICKUP,1f);Text.actionBar(k,"<green>+1 kill</green> <gray>sur</gray> "+colored(id));}}
-        plugin.event("player_death",Map.of("player",id.toString(),"eliminated",finalKill),false);
+        Map<String,Object> death=new HashMap<>(Map.of("player",id.toString(),"eliminated",finalKill,"void",void_));
+        if(killer!=null)death.put("killer",killer.toString());
+        plugin.event("player_death",death,false);
         checkWin();
     }
     @EventHandler public void respawn(PlayerRespawnEvent e) {
@@ -365,7 +392,7 @@ final class Arena implements Listener {
     /** Chat prefix for a participant (team color, gray when eliminated). */
     String chatName(Player p) {
         Integer side=sides.get(p.getUniqueId());
-        if(side==null)return "<gray>"+p.getName();
+        if(side==null)return spectators.contains(p.getUniqueId())?"<aqua>[Staff]</aqua> <white>"+p.getName():"<gray>"+p.getName();
         return eliminated.contains(p.getUniqueId())?"<dark_gray>[Éliminé] <gray>"+p.getName():(side==0?"<red>[Rouge] ":"<blue>[Bleu] ")+p.getName();
     }
 }

@@ -50,6 +50,15 @@ def main():
     role = sub.add_parser('role')
     role.add_argument('name')
     role.add_argument('role', choices=['player','moderator','admin'])
+    games = sub.add_parser('games', help='dernières parties (historique JSON)')
+    games.add_argument('--player', help='seulement les parties de ce joueur')
+    games.add_argument('--limit', type=int, default=20)
+    game = sub.add_parser('game', help='détail d’une partie (fichier JSON)')
+    game.add_argument('id')
+    mod = sub.add_parser('mod', help='modération depuis la console : ban, unban, kick, mute, unmute, warn, history')
+    mod.add_argument('action', choices=['ban','unban','kick','mute','unmute','warn','history'])
+    mod.add_argument('name')
+    mod.add_argument('args', nargs='*', help='durée (30m, 2h, 7d, perm) puis raison')
     auth = sub.add_parser('auth', help='online (comptes Microsoft vérifiés) ou offline (secours temporaire)')
     auth.add_argument('mode', choices=['online','offline'])
     args = parser.parse_args()
@@ -79,6 +88,31 @@ def main():
         else:
             print('Mode EN LIGNE enregistré : comptes Microsoft vérifiés.')
         print('Appliquer : redémarrer le réseau (rush restart).')
+    elif args.command == 'games':
+        from .history import History
+        records = History(runtime/'history').recent(args.limit, args.player)
+        if not records:
+            print('Aucune partie enregistrée.')
+        for r in records:
+            teams = ' vs '.join(', '.join(p['pseudo'] for p in team) for team in r['equipes'].values())
+            result = ('vainqueur ' + r['vainqueur']) if r['statut'] == 'terminee' else (r['statut'] + (' : ' + r['raison_annulation'] if r['raison_annulation'] else ''))
+            freezes = sum(m['action'] == 'freeze' for m in r['moderation'])
+            print(f"{r['debut'][:16].replace('T', ' ')}  {r['partie']}  {r['mode']:3}  {r['carte']:12} {r['duree'] or '--:--'}  "
+                  f"{'classée    ' if r['classee'] else 'non classée'} {result:28} {teams}" + (f"  [{freezes} freeze]" if freezes else ''))
+    elif args.command == 'game':
+        from .history import History
+        path = History(runtime/'history').find(args.id)
+        if not path:
+            raise SystemExit('Partie introuvable : ' + args.id)
+        print(path)
+        print(path.read_text())
+    elif args.command == 'mod':
+        import re as _re
+        result = request('/moderate', {'action':args.action, 'name':args.name, 'args':args.args})
+        plain = lambda s: _re.sub(r'<[^>]+>', '', s).replace('\\<', '<')
+        print(plain(result['message']))
+        for line in result.get('lines', []):
+            print('  ' + plain(line))
     elif args.command == 'status':
         print(json.dumps(request('/health'), indent=2))
     elif args.command == 'role':
@@ -129,7 +163,8 @@ def main():
         token = (runtime/'api.token').read_text().strip()
         processes = Processes(ROOT,settings,token,(runtime/'forwarding.secret').read_text().strip(),log)
         from .maps import Maps
-        core = Core(runtime/'rush.sqlite3',processes,log,offline=bool(settings.get('offline_mode')),maps=Maps(runtime/'maps'))
+        from .history import History
+        core = Core(runtime/'rush.sqlite3',processes,log,offline=bool(settings.get('offline_mode')),maps=Maps(runtime/'maps'),history=History(runtime/'history'))
         if settings.get('offline_mode'):
             log('offline_mode_enabled')
             print('ATTENTION : mode hors ligne, pseudos non vérifiés, parties non classées.', flush=True)

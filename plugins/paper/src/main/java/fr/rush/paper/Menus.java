@@ -99,6 +99,8 @@ final class Menus implements Listener {
         g.set(42,icon(Material.BARRIER,"<red>Quitter la file / le salon","<gray>Annule ta recherche en cours."),()->{p.closeInventory();command(p,"leave");});
         if(pr!=null&&"admin".equals(pr.get("role").getAsString()))
             g.set(45,icon(Material.FILLED_MAP,"<red><bold>Maps</bold></red> <gray>(admin)","<gray>Créer, éditer, activer les maps.","","<yellow>▶ Clic : ouvrir"),()->maps(p));
+        if(pr!=null&&Set.of("admin","moderator").contains(pr.get("role").getAsString()))
+            g.set(53,icon(Material.SPYGLASS,"<aqua><bold>Staff</bold></aqua> <gray>(modération)","<gray>Parties, joueurs, signalements.","","<yellow>▶ Clic : ouvrir"),()->plugin.moderation.menu(p));
         g.set(49,icon(Material.OAK_DOOR,"<gray>Fermer"),()->p.closeInventory());
         g.frame().open(p);
     }

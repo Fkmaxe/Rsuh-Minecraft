@@ -25,6 +25,7 @@ public final class RushPlugin extends JavaPlugin implements Listener {
     Editor editor;
     Menus menus;
     Hud hud;
+    Moderation moderation;
     World world;
     private Logger events;
     private FileHandler handler;
@@ -38,9 +39,10 @@ public final class RushPlugin extends JavaPlugin implements Listener {
             handler=new FileHandler(getDataFolder()+"/events-%g.jsonl",10_000_000,5,true);
             handler.setFormatter(new java.util.logging.Formatter(){public String format(LogRecord r){return r.getMessage()+"\n";}});
             events.addHandler(handler);
-            api=new Api(this); menus=new Menus(this); hud=new Hud(this);
+            api=new Api(this); menus=new Menus(this); hud=new Hud(this); moderation=new Moderation(this);
             getServer().getPluginManager().registerEvents(this,this);
             getServer().getPluginManager().registerEvents(menus,this);
+            getServer().getPluginManager().registerEvents(moderation,this);
             // onEnable runs before the default world is created for STARTUP plugins.
             Bukkit.getScheduler().runTask(this,()-> {
                 world=Bukkit.getWorlds().getFirst();
@@ -70,6 +72,7 @@ public final class RushPlugin extends JavaPlugin implements Listener {
                         hud.start();
                     }
                 }
+                moderation.start();
                 event("server_ready",Map.of("instance",config.get("id").getAsString()),false);
                 getLogger().info("RUSH_READY");
             });
@@ -128,7 +131,7 @@ public final class RushPlugin extends JavaPlugin implements Listener {
     @EventHandler public void drop(PlayerDropItemEvent e) { if(lobby())e.setCancelled(true); }
 
     /** Chat: role and Elo in the lobby, team color in games. Player text is never parsed as markup. */
-    @EventHandler public void chat(AsyncChatEvent e) {
+    @EventHandler(ignoreCancelled=true) public void chat(AsyncChatEvent e) {
         Player sender=e.getPlayer();
         String prefix;
         if(arena!=null) prefix=arena.chatName(sender);
@@ -147,6 +150,12 @@ public final class RushPlugin extends JavaPlugin implements Listener {
         String action=cmd.getName();
         if(action.equals("shop")) {if(arena!=null)menus.shop(p);else Text.error(p,"La boutique n’existe que pendant une partie");return true;}
         if(action.equals("map")&&editor!=null){editor.command(p,args);return true;}
+        if(action.equals("invsee")||action.equals("goto")) {
+            if(args.length!=1){Text.error(p,"/"+action+" <pseudo>");return true;}
+            if(action.equals("invsee"))moderation.invsee(p,args[0]);else moderation.goTo(p,args[0]);
+            return true;
+        }
+        if(action.equals("staff")&&args.length==0){moderation.menu(p);return true;}
         if(action.equals("map")&&args.length==0&&lobby()){menus.maps(p);return true;}
         if(action.equals("rush")) {
             if(args.length==0) {if(lobby())menus.main(p);else Text.error(p,"Le menu est disponible au lobby");return true;}
@@ -156,7 +165,7 @@ public final class RushPlugin extends JavaPlugin implements Listener {
         if(action.equals("friend")&&args.length==0&&lobby()){menus.friends(p);return true;}
         if(action.equals("team")&&args.length==0&&lobby()){menus.team(p);return true;}
         if(action.equals("private")&&args.length==0&&lobby()){menus.privateMenu(p);return true;}
-        if(!lobby() && !Set.of("leave","status","leaderboard","friend","admin").contains(action)) {Text.error(p,"Commande indisponible ici : /rush leave pour revenir au lobby");return true;}
+        if(!lobby() && !Set.of("leave","status","leaderboard","friend","admin","spec","vanish","freeze","kick","ban","unban","mute","unmute","warn","history","report","sc","staff").contains(action)) {Text.error(p,"Commande indisponible ici : /rush leave pour revenir au lobby");return true;}
         String finalAction=action;
         api.command(p,action,args,result->{
             Text.ok(p,result.get("message").getAsString());
@@ -174,6 +183,8 @@ public final class RushPlugin extends JavaPlugin implements Listener {
             case "friend" -> List.of("add","accept","deny","remove","list");
             case "private" -> List.of("create","join","invite","start","list");
             case "leaderboard" -> List.of("global","1v1","2v2","5v5");
+            case "kick","ban","unban","mute","unmute","warn","freeze","history","report","invsee","goto" -> Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
+            case "spec" -> Bukkit.getOnlinePlayers().stream().map(Player::getName).toList();
             case "map" -> editor!=null?List.of("spawn","lit","tp","pnj","gen","bordure","hauteur","vide","info","save","quitter")
                 :List.of("list","create","edit","enable","disable","modes","delete");
             default -> List.of();
@@ -188,6 +199,7 @@ public final class RushPlugin extends JavaPlugin implements Listener {
             case "map bordure" -> List.of("centre","100","180","300");
             default -> List.of();
         };
+        else if(args.length==2&&Set.of("ban","mute").contains(cmd.getName())) choices=List.of("30m","1h","1d","7d","perm");
         else if(args.length==3&&cmd.getName().equals("map")&&args[0].equals("pnj")) choices=args[1].equals("boutique")?GameMap.SHOPS:List.of("rouge","bleu");
         else if(args.length==3&&cmd.getName().equals("map")&&args[0].equals("create")) choices=List.of("classic","vide");
         else choices=List.of();
