@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Installe (ou met à jour) puis démarre le réseau Rush sur une VM Linux.
-#   sudo ./install.sh [--accept-eula] [--dir /opt/rush] [--user rush] [--no-service] [--no-start]
+# Installe (ou met à jour) puis démarre le réseau Rush sur une VM Linux, en root.
+# Fonctionne depuis le dossier de scripts/package.sh ou depuis le dépôt cloné (deploy/install.sh),
+# auquel cas les plugins sont compilés sur la machine.
+#   ./install.sh [--accept-eula] [--dir /opt/rush] [--user rush] [--no-service] [--no-start]
 # Relancer le script met à jour le code sans toucher à runtime/ (base, clés, réglages locaux).
 set -euo pipefail
 
@@ -23,19 +25,29 @@ while [ $# -gt 0 ]; do
 done
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
+[ -f "$SRC/orchestrator/cli.py" ] || SRC="$(dirname "$SRC")"  # deploy/install.sh d'un dépôt cloné
 step() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mErreur : %s\033[0m\n' "$*" >&2; exit 1; }
 as_rush() { (cd "$DIR" && runuser -u "$RUSH_USER" -- "$@"); }
 
-[ "$(id -u)" = 0 ] || die "lancer avec sudo"
+[ "$(id -u)" = 0 ] || die "lancer en root (sudo ./install.sh ou su -)"
 [ "$(uname -s)" = Linux ] || die "ce script vise Linux"
-[ -f "$SRC/orchestrator/cli.py" ] && [ -f "$SRC/artifacts/rush-paper.jar" ] || die "dossier incomplet : utiliser le dossier produit par scripts/package.sh"
+[ -f "$SRC/orchestrator/cli.py" ] || die "dossier incomplet : cloner tout le dépôt ou utiliser dist/rush-server"
+if [ -f "$SRC/pom.xml" ] && [ -d "$SRC/plugins" ]; then
+  BUILD=1; JAVA_PKG=jdk  # Dépôt cloné : compiler les plugins, il faut javac.
+elif [ -f "$SRC/artifacts/rush-paper.jar" ] && [ -f "$SRC/artifacts/rush-proxy.jar" ]; then
+  BUILD=0; JAVA_PKG=jre
+else
+  die "dossier incomplet : ni sources des plugins ni plugins compilés"
+fi
 [ -d /run/systemd/system ] || { [ "$SERVICE" = 1 ] && echo "systemd absent : installation sans service."; SERVICE=0; }
 
 java_major() { "$1" -version 2>&1 | sed -n 's/.*version "\([0-9]*\).*/\1/p' | head -1; }
 find_java() {
   for candidate in "$(command -v java 2>/dev/null || true)" /usr/lib/jvm/*/bin/java; do
-    [ -x "$candidate" ] && [ "$(java_major "$candidate")" -ge 21 ] 2>/dev/null && { echo "$candidate"; return; }
+    [ -x "$candidate" ] && [ "$(java_major "$candidate")" -ge 21 ] 2>/dev/null || continue
+    [ "$BUILD" = 0 ] || [ -x "$(dirname "$(readlink -f "$candidate")")/javac" ] || continue
+    echo "$candidate"; return
   done
   return 1
 }
@@ -46,8 +58,8 @@ if command -v apt-get >/dev/null; then
   apt-get update -qq
   apt-get install -y -qq python3 curl ca-certificates >/dev/null
   if ! find_java >/dev/null; then
-    if apt-cache policy openjdk-21-jre-headless 2>/dev/null | grep -q 'Candidate: [0-9]'; then
-      apt-get install -y -qq openjdk-21-jre-headless >/dev/null
+    if apt-cache policy "openjdk-21-$JAVA_PKG-headless" 2>/dev/null | grep -q 'Candidate: [0-9]'; then
+      apt-get install -y -qq "openjdk-21-$JAVA_PKG-headless" >/dev/null
     else
       # Debian 12 ne fournit que Java 17 : dépôt officiel Eclipse Temurin.
       apt-get install -y -qq gnupg >/dev/null
@@ -55,12 +67,14 @@ if command -v apt-get >/dev/null; then
       curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor --yes -o /etc/apt/keyrings/adoptium.gpg
       echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(. /etc/os-release && echo "$VERSION_CODENAME") main" > /etc/apt/sources.list.d/adoptium.list
       apt-get update -qq
-      apt-get install -y -qq temurin-21-jre >/dev/null
+      apt-get install -y -qq "temurin-21-$JAVA_PKG" >/dev/null
     fi
   fi
 elif command -v dnf >/dev/null; then
-  dnf install -y -q python3 curl
-  find_java >/dev/null || dnf install -y -q java-21-openjdk-headless
+  dnf install -y -q python3 curl tar gzip
+  if ! find_java >/dev/null; then
+    if [ "$BUILD" = 1 ]; then dnf install -y -q java-21-openjdk-devel; else dnf install -y -q java-21-openjdk-headless; fi
+  fi
 else
   echo "Gestionnaire de paquets non reconnu : installer Java 21+, Python 3.10+ et curl."
 fi
@@ -78,12 +92,24 @@ if [ "$SERVICE" = 1 ] && systemctl is-active --quiet rush; then
 fi
 install -d -m 755 "$DIR" "$DIR/artifacts"
 if [ "$SRC" != "$DIR" ]; then
-  rm -rf "$DIR/orchestrator" "$DIR/scripts" "$DIR/config" "$DIR/docs"
+  rm -rf "$DIR/orchestrator" "$DIR/scripts" "$DIR/config" "$DIR/docs" "$DIR/deploy" "$DIR/plugins"
   cp -R "$SRC/orchestrator" "$SRC/scripts" "$SRC/config" "$SRC/docs" "$DIR/"
-  cp "$SRC/install.sh" "$SRC/README.md" "$DIR/"
-  cp "$SRC/artifacts/rush-paper.jar" "$SRC/artifacts/rush-proxy.jar" "$DIR/artifacts/"
+  cp "$SRC/README.md" "$DIR/"
+  if [ "$BUILD" = 1 ]; then
+    cp -R "$SRC/deploy" "$SRC/plugins" "$DIR/" && cp "$SRC/pom.xml" "$DIR/"
+    rm -rf "$DIR"/plugins/*/target
+  else
+    cp "$SRC/install.sh" "$DIR/"
+    cp "$SRC/artifacts/rush-paper.jar" "$SRC/artifacts/rush-proxy.jar" "$DIR/artifacts/"
+  fi
 fi
 chown -R "$RUSH_USER:$RUSH_USER" "$DIR"
+
+if [ "$BUILD" = 1 ]; then
+  step "Compilation des plugins (Maven, 1 à 3 min la première fois)"
+  JAVA_HOME="$(dirname "$(dirname "$(readlink -f "$JAVA")")")"
+  as_rush env JAVA_HOME="$JAVA_HOME" PATH="$JAVA_HOME/bin:$PATH" bash scripts/build.sh -q
+fi
 
 step "Téléchargement des serveurs (SHA-256 vérifiés)"
 as_rush "$PYTHON" scripts/download.py

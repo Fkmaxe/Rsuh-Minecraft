@@ -20,6 +20,8 @@ tar xzf rush-server.tar.gz && cd rush-server
 sudo ./install.sh                            # demande l’acceptation de l’EULA ; --accept-eula en non interactif
 ```
 
+Depuis un clone du dépôt, lancer directement `deploy/install.sh` en root (`sudo` n’est pas requis si l’on est déjà root) : le script installe alors un JDK et compile les plugins sur la VM. Après un `git pull`, le relancer pour mettre à jour.
+
 Le script installe Java 21 (dépôt Temurin si la distribution ne le fournit pas), Python et curl, crée l’utilisateur système `rush`, copie le réseau dans `/opt/rush`, télécharge les serveurs vérifiés par SHA-256, génère les clés, règle `max_instances` selon la RAM, ouvre 25565/TCP si ufw ou firewalld est actif, installe et démarre le service systemd, puis attend que le lobby réponde. Relancer `sudo ./install.sh` avec une nouvelle archive met à jour le code et redémarre le service sans toucher à `runtime/` (base, clés, réglages locaux). Options : `--dir`, `--user`, `--no-service`, `--no-start`.
 
 Administration ensuite avec `rush status`, `rush role <pseudo> admin`, `rush deploy-test --mode 5v5`, `rush logs`, `rush stop|start|restart`.
