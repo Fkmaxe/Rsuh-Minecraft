@@ -5,6 +5,8 @@
 #   ./install.sh [--accept-eula] [--dir /opt/rush] [--user rush] [--no-service] [--no-start]
 # Relancer le script met à jour le code sans toucher à runtime/ (base, clés, réglages locaux).
 set -euo pipefail
+# « su » sans tiret (Debian) garde le PATH utilisateur, sans /usr/sbin (useradd, runuser, ufw).
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 DIR=/opt/rush
 RUSH_USER=rush
@@ -143,6 +145,7 @@ step "Commande « rush »"
 cat > /usr/local/bin/rush <<EOF
 #!/bin/sh
 # Raccourci d'administration du réseau Rush installé dans $DIR.
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:\$PATH"
 case "\$1" in
   start|stop|restart) exec systemctl "\$1" rush ;;
   logs) exec journalctl -u rush -f ;;
